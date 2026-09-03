@@ -42,11 +42,11 @@ function buildChoices(count = 3) {
   const wCount = Object.keys(G.weapons).length;
   const pCount = Object.keys(G.passives).filter(k => G.passives[k] > 0).length;
 
-  // 무기: 신규 해금 또는 레벨업
+  // 무기: 신규 해금 또는 레벨업 (진화 완료 무기는 제외)
   for (const id in WEAPON_DEFS) {
     const w = G.weapons[id];
     if (!w && wCount < MAX_WEAPONS) pool.push({ type: 'weapon', id, isNew: true, weight: 10 });
-    else if (w && w.lvl < 5) pool.push({ type: 'weapon', id, lvl: w.lvl + 1, weight: 12 });
+    else if (w && w.lvl < 5 && !w.evolved) pool.push({ type: 'weapon', id, lvl: w.lvl + 1, weight: 12 });
   }
   // 패시브
   for (const id in PASSIVE_DEFS) {
@@ -151,9 +151,15 @@ function openChest(val) {
   SFX.play('chest');
   shakeCam(8);
 
+  // 만렙 무기가 있으면 진화가 첫 보상!
+  const evolvable = Object.keys(G.weapons).filter(id => G.weapons[id].lvl >= 5 && !G.weapons[id].evolved && EVOLUTIONS[id]);
+  const evoId = evolvable.length ? choice(evolvable) : null;
+
   const nRewards = Math.min(val >= 5 ? 5 : (val >= 4 ? 4 : 3), 5);
   const rewards = [];
-  const allEmojis = Object.values(WEAPON_DEFS).map(w => w.emoji).concat(Object.values(PASSIVE_DEFS).map(p => p.emoji));
+  const allEmojis = Object.values(WEAPON_DEFS).map(w => w.emoji)
+    .concat(Object.values(PASSIVE_DEFS).map(p => p.emoji))
+    .concat(Object.values(EVOLUTIONS).map(e => e.emoji));
 
   const box = document.getElementById('ch-slots');
   box.innerHTML = '';
@@ -165,11 +171,13 @@ function openChest(val) {
     box.appendChild(el);
     slots.push({ el: el.firstChild, stopped: false, final: null });
   }
-  document.getElementById('ch-title').textContent = val >= 5 ? '👑 보스의 보물!' : '💎 보물 상자!';
+  document.getElementById('ch-title').textContent = evoId ? '⚡ 무기 진화 상자!!' : (val >= 5 ? '👑 보스의 보물!' : '💎 보물 상자!');
   document.getElementById('overlay-chest').classList.remove('hidden');
   document.getElementById('ch-done').classList.add('hidden');
 
-  // 슬롯머신 애니메이션: 순차적으로 멈춤
+  // 진화 슬롯 특별 스타일
+  if (evoId) slots[0].el.parentElement.classList.add('evolve');
+
   const startT = performance.now();
   const stopAt = slots.map((_, i) => 800 + i * 480);
   const spin = setInterval(() => {
@@ -181,11 +189,19 @@ function openChest(val) {
         s.el.textContent = allEmojis[(Math.random() * allEmojis.length) | 0];
         if (t > stopAt[i]) {
           s.stopped = true;
-          const u = buildChoices(1)[0];
-          rewards.push(u);
-          const def = u.type === 'weapon' ? WEAPON_DEFS[u.id] : (u.type === 'passive' ? PASSIVE_DEFS[u.id] : u);
-          s.el.textContent = def.emoji || u.emoji;
-          s.el.parentElement.classList.add('stopped');
+          if (i === 0 && evoId) {
+            const evo = EVOLUTIONS[evoId];
+            rewards.push({ type: 'evolve', id: evoId });
+            s.el.textContent = evo.emoji;
+            s.el.parentElement.classList.add('stopped', 'evolved');
+            showBannerOnce(evo.emoji + ' ' + evo.name + '!');
+          } else {
+            const u = buildChoices(1)[0];
+            rewards.push(u);
+            const def = u.type === 'weapon' ? WEAPON_DEFS[u.id] : (u.type === 'passive' ? PASSIVE_DEFS[u.id] : u);
+            s.el.textContent = def.emoji || u.emoji;
+            s.el.parentElement.classList.add('stopped');
+          }
           SFX.play('tick');
         }
       }
@@ -193,9 +209,24 @@ function openChest(val) {
     if (allStopped) {
       clearInterval(spin);
       setTimeout(() => {
-        for (const u of rewards) applyUpgrade(u);
-        SFX.play('levelup');
+        let evolvedName = null;
+        for (const u of rewards) {
+          if (u.type === 'evolve') {
+            G.weapons[u.id].evolved = true;
+            evolvedName = EVOLUTIONS[u.id];
+            showBanner('🌟 ' + WEAPON_DEFS[u.id].name + ' → ' + evolvedName.name + ' 진화!', '#ffd23f');
+            shakeCam(10);
+            // 진화 폭발 파티클
+            const p = G.player;
+            for (let k = 0; k < 40; k++) {
+              const a = Math.random() * TAU;
+              G.particles.push({ x: p.x, y: p.y, vx: Math.cos(a) * rand(150, 480), vy: Math.sin(a) * rand(150, 480), life: rand(0.4, 0.9), maxLife: 0.9, size: rand(3, 7), color: choice(['#ffd23f', '#35f0ff', '#ff5d8f', '#ffffff']), grav: 0 });
+            }
+          } else applyUpgrade(u);
+        }
+        SFX.play(evolvedName ? 'evolve' : 'levelup');
         const names = rewards.map(u => {
+          if (u.type === 'evolve') return '🌟 ' + EVOLUTIONS[u.id].name + ' 진화!';
           const def = u.type === 'weapon' ? WEAPON_DEFS[u.id] : (u.type === 'passive' ? PASSIVE_DEFS[u.id] : u);
           return (def.emoji || u.emoji) + ' ' + (def.name || u.name);
         }).join(' · ');
@@ -210,4 +241,10 @@ function openChest(val) {
     document.getElementById('ch-result').textContent = '';
     if (G.state === 'chest') G.state = 'playing';
   };
+}
+
+let bannerOnceT = 0;
+function showBannerOnce(text) {
+  // 슬롯 정지 순간의 짧은 알림 (메인 배너와 충돌하지 않게 짧게)
+  SFX.play('pick');
 }

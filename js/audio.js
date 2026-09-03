@@ -91,6 +91,26 @@ const SFX = {
         break;
       case 'dash':    this.tone(220, 0.2, 'sawtooth', 0.2, 400); break;
       case 'laser':   this.tone(1400, 0.12, 'sawtooth', 0.1, -1100); break;
+      case 'rush':
+        [131, 262, 392, 523, 784, 1046, 1318].forEach((f, i) => this.tone(f, 0.14, 'square', 0.2, 0, i * 0.05));
+        this.noise(0.6, 0.2, 2000);
+        break;
+      case 'rushend': this.tone(880, 0.25, 'sawtooth', 0.16, -600); this.tone(440, 0.3, 'square', 0.12, -300, 0.08); break;
+      case 'crystal':
+        this.noise(0.35, 0.3, 3200);
+        [1568, 2093, 2637].forEach((f, i) => this.tone(f, 0.18, 'sine', 0.14, -300, i * 0.05));
+        break;
+      case 'crystalhit': this.tone(1800 + Math.random() * 400, 0.05, 'sine', 0.1, -200); break;
+      case 'evolve':
+        [392, 523, 659, 784, 1046, 1318, 1568].forEach((f, i) => this.tone(f, 0.2, 'sawtooth', 0.16, 0, i * 0.09));
+        this.noise(0.5, 0.15, 1500);
+        break;
+      case 'warn':
+        this.tone(196, 0.22, 'square', 0.22, -30);
+        this.tone(196, 0.22, 'square', 0.22, -30, 0.3);
+        break;
+      case 'charge':  this.tone(150, 0.55, 'sawtooth', 0.14, 320); break;
+      case 'ragehit': this.tone(240, 0.08, 'sawtooth', 0.12, 500); break;
     }
   },
 };

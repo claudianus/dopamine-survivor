@@ -6,7 +6,7 @@
 <title>도파민 서바이버 - 프로시듀럴 맵 서바이벌</title>
 <meta name="description" content="무한 프로시듀럴 맵에서 벌어지는 도파민 폭발 서바이벌! 레벨업, 무기 수집, 보물 상자, 보스전!">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>💎</text></svg>">
-<link rel="stylesheet" href="style.css?v=101">
+<link rel="stylesheet" href="style.css?v=104">
 </head>
 <body>
 
@@ -38,6 +38,10 @@
 
   <div id="bottombar">
     <div id="weaponBar"></div>
+    <div id="ragebar">
+      <div id="ragefill"></div>
+      <span id="ragetext">⚡ 도파민 러시</span>
+    </div>
     <div id="hpbar">
       <div id="hpfill"></div>
       <span id="hptext">100 / 100</span>
@@ -51,6 +55,9 @@
 
 <button id="muteBtn" class="iconbtn" title="소리 켜기/끄기">🔊</button>
 <button id="pauseBtn" class="iconbtn hidden" title="일시정지 (ESC)">⏸️</button>
+<button id="rageBtn" title="도파민 러시! (SPACE)">⚡</button>
+
+<div id="rushfx"></div>
 
 <div id="joystick"><div></div></div>
 
@@ -118,12 +125,12 @@
   </div>
 </div>
 
-<script src="js/core.js?v=101"></script>
-<script src="js/audio.js?v=101"></script>
-<script src="js/map.js?v=101"></script>
-<script src="js/entities.js?v=102"></script>
-<script src="js/weapons.js?v=102"></script>
-<script src="js/upgrades.js?v=102"></script>
-<script src="js/game.js?v=102"></script>
+<script src="js/core.js?v=104"></script>
+<script src="js/audio.js?v=104"></script>
+<script src="js/map.js?v=104"></script>
+<script src="js/entities.js?v=104"></script>
+<script src="js/weapons.js?v=104"></script>
+<script src="js/upgrades.js?v=104"></script>
+<script src="js/game.js?v=104"></script>
 </body>
 </html>

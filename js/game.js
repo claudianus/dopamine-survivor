@@ -34,16 +34,20 @@ function initRun(seed) {
   G.particles = [];
   G.dmgTexts = [];
   G.explosions = [];
+  G.crystals = [];
   G.boss = null;
   G.bossSpawned = new Set();
   G.stats = { kills: 0, gems: 0, bestCombo: 0 };
   G.combo = 0; G.comboT = 0;
   G.spawnAcc = 0;
   G.rushT = 45;
+  G.eliteWaveT = 150;
+  G.crystalT = 10;
   G.pendingLevelUps = 0;
   G.flash = 0;
   G.hurtVin = 0;
   G.dayTint = 0;
+  G.rage = { value: 0, max: 100, active: false, t: 0 };
 
   G.player = {
     x: 0, y: 0, r: 16, hp: 120, maxHp: 120,
@@ -92,9 +96,53 @@ function showBanner(text, color) {
   el.classList.add('show');
 }
 
+/* ---------- 도파민 러시 ---------- */
+function activateRush() {
+  const r = G.rage;
+  if (!r || r.active || r.value < r.max) return;
+  r.active = true;
+  r.t = 6;
+  SFX.play('rush');
+  shakeCam(12);
+  showBanner('🔥 도파민 러시!! 🔥', '#ff4d9d');
+  document.body.classList.add('rush');
+  document.getElementById('rageBtn').classList.remove('ready');
+  const p = G.player;
+  // 발동 폭발: 주변 적 튕겨내기 + 데미지
+  if (!G.hash) buildSpatialHash();
+  for (const e of queryEnemies(p.x, p.y, 220)) {
+    const d = dist(e.x, e.y, p.x, p.y) || 1;
+    e.x += (e.x - p.x) / d * 60;
+    e.y += (e.y - p.y) / d * 60;
+    damageEnemy(e, 30, true, null);
+  }
+  for (let i = 0; i < 50; i++) {
+    const a = (i / 50) * TAU;
+    G.particles.push({ x: p.x, y: p.y, vx: Math.cos(a) * rand(200, 560), vy: Math.sin(a) * rand(200, 560), life: rand(0.4, 0.9), maxLife: 0.9, size: rand(3, 7), color: `hsl(${(i / 50) * 360},100%,60%)`, grav: 0 });
+  }
+}
+
+function updateRage(dt) {
+  const r = G.rage;
+  if (r.active) {
+    r.t -= dt;
+    r.value = Math.max(0, r.max * (r.t / 6));
+    if (G.player.iFrames < 0.1) G.player.iFrames = 0.1; // 러시 중 무적
+    if (r.t <= 0) {
+      r.active = false;
+      r.value = 0;
+      document.body.classList.remove('rush');
+      SFX.play('rushend');
+    }
+  } else if (r.value >= r.max) {
+    document.getElementById('rageBtn').classList.add('ready');
+  }
+}
+
 /* ---------- 플레이어 ---------- */
 function hurtPlayer(dmg) {
   const p = G.player;
+  if (G.rage.active) { SFX.play('ragehit'); return; } // 러시 중 무적
   p.hp -= dmg;
   G.hurtVin = 1;
   shakeCam(6);
@@ -122,7 +170,7 @@ function updatePlayer(dt) {
     mx /= len || 1; my /= len || 1;
     p.faceX = lerp(p.faceX, mx, 0.2);
     p.faceY = lerp(p.faceY, my, 0.2);
-    const spd = p.speed * MapGen.groundSpeed(p.x, p.y);
+    const spd = p.speed * MapGen.groundSpeed(p.x, p.y) * (G.rage.active ? 1.3 : 1);
     p.x += mx * spd * dt;
     p.y += my * spd * dt;
     // 이동 잔상
@@ -150,7 +198,9 @@ function updatePlayer(dt) {
     pk.age = (pk.age || 0) + dt;
     const d2 = dist2(pk.x, pk.y, p.x, p.y);
     // 6초 이상 남아있는 젬은 어디서든 플레이어에게 이끌린다 (반경 스트레스 제거)
-    if (pk.pull || d2 < magR * magR || (pk.kind === 'gem' && pk.age > 6)) {
+    // 상자·하트·자석도 10초 후면 회수되게 (무한 맵에서 유실 방지)
+    const pullAge = pk.kind === 'gem' ? 6 : 10;
+    if (pk.pull || d2 < magR * magR || pk.age > pullAge) {
       pk.pull = true;
       const a = ang(pk.x, pk.y, p.x, p.y);
       const sp = 520;
@@ -228,10 +278,12 @@ function update(dt) {
   updatePlayer(dt);
   updateSpawns(dt);
   updateEnemies(dt);
+  updateCrystals(dt);
   updateWeapons(dt);
   updateProjectiles(dt);
   updateEProjectiles(dt);
   updateFx(dt);
+  updateRage(dt);
 
   // 콤보 감소
   if (G.comboT > 0) {
@@ -269,6 +321,9 @@ function render() {
 
   // 픽업
   for (const pk of G.pickups) drawPickup(pk);
+
+  // 도파민 결정
+  for (const c of G.crystals) drawCrystal(ctx, c);
 
   // 적 (y 정렬)
   const sorted = G.enemies.slice().sort((a, b) => a.y - b.y);
@@ -483,6 +538,14 @@ function updateHUD(force) {
   document.getElementById('hpfill').style.width = clamp(p.hp / p.maxHp, 0, 1) * 100 + '%';
   document.getElementById('hptext').textContent = Math.ceil(p.hp) + ' / ' + p.maxHp;
 
+  // 도파민 러시 게이지
+  const rf = document.getElementById('ragefill');
+  rf.style.width = clamp(G.rage.value / G.rage.max, 0, 1) * 100 + '%';
+  const rbar = document.getElementById('ragebar');
+  if (G.rage.active) rbar.className = 'active';
+  else if (G.rage.value >= G.rage.max) rbar.className = 'ready';
+  else rbar.className = '';
+
   hudAcc += 1;
   if (force || hudAcc > 8) {
     hudAcc = 0;
@@ -519,12 +582,17 @@ function renderHUDBars() {
   wb.innerHTML = '';
   for (const id in G.weapons) {
     const def = WEAPON_DEFS[id];
+    const w = G.weapons[id];
     const el = document.createElement('div');
-    el.className = 'slot';
-    el.title = def.name;
-    let pips = '';
-    for (let i = 0; i < 5; i++) pips += `<i class="${i < G.weapons[id].lvl ? 'on' : ''}"></i>`;
-    el.innerHTML = `<span>${def.emoji}</span><b>${pips}</b>`;
+    el.className = 'slot' + (w.evolved ? ' evolved' : '');
+    el.title = w.evolved ? '🌟 ' + EVOLUTIONS[id].name + ' (진화)' : def.name;
+    if (w.evolved) {
+      el.innerHTML = `<span>${EVOLUTIONS[id].emoji}</span><b class="evo">MAX</b>`;
+    } else {
+      let pips = '';
+      for (let i = 0; i < 5; i++) pips += `<i class="${i < w.lvl ? 'on' : ''}"></i>`;
+      el.innerHTML = `<span>${def.emoji}</span><b>${pips}</b>`;
+    }
     wb.appendChild(el);
   }
   // 패시브 아이콘
@@ -575,6 +643,10 @@ function victory() { endScreen(true); }
 G.keys = new Set();
 window.addEventListener('keydown', (e) => {
   G.keys.add(e.code);
+  if (e.code === 'Space') {
+    e.preventDefault();
+    activateRush();
+  }
   if (e.code === 'Escape' || e.code === 'KeyP') togglePause();
   if (G.state === 'levelup') {
     const n = parseInt(e.key, 10);
@@ -700,6 +772,7 @@ function bindUI() {
   muteBtn.onclick = () => { SFX.init(); SFX.setMuted(!SFX.muted); setMuteIcon(); };
   setMuteIcon();
   document.getElementById('pauseBtn').onclick = togglePause;
+  document.getElementById('rageBtn').onclick = activateRush;
 
   const best = localStorage.getItem('ds_best');
   if (best) document.getElementById('bestScore').textContent = '🏅 최고 기록: ' + parseInt(best, 10).toLocaleString();

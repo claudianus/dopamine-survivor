@@ -16,6 +16,10 @@ const ENEMY_TYPES = {
   golem:   { name: '마그마 골렘', biomes: [B_VOLCANIC],     tier: 3, hp: 120, spd: 44,  r: 26, dmg: 20, xp: 8, color: '#c93b1d' },
   cguard:  { name: '크리스탈 수호자', biomes: [B_CRYSTAL],  tier: 3, hp: 75,  spd: 76,  r: 20, dmg: 16, xp: 8, color: '#c77dff' },
   wisp:    { name: '도파민 정령', biomes: [B_CRYSTAL, B_ROCK], tier: 2, hp: 18, spd: 104, r: 13, dmg: 9, xp: 4, color: '#ff8fd8' },
+  charger: { name: '돌진러',   biomes: [B_DESERT, B_VOLCANIC, B_ROCK], tier: 2, hp: 30, spd: 84, r: 18, dmg: 16, xp: 4, color: '#ff7b39' },
+  spitter: { name: '뱉는놈',   biomes: [B_FOREST, B_SNOW, B_CRYSTAL], tier: 2, hp: 24, spd: 68, r: 16, dmg: 10, xp: 4, color: '#7ed957' },
+  splitter:{ name: '분열 슬라임', biomes: [B_GRASS, B_FOREST, B_SAND], tier: 1, hp: 18, spd: 74, r: 17, dmg: 8, xp: 2, color: '#8ef0c0' },
+  splitling:{ name: '꼬마 슬라임', biomes: [], tier: 1, hp: 7, spd: 98, r: 10, dmg: 5, xp: 1, color: '#b8ffd9' },
 };
 
 const BOSSES = [
@@ -131,6 +135,46 @@ function updateSpawns(dt) {
     shakeCam(6);
   }
 
+  // 150초마다 정예 웨이브
+  G.eliteWaveT = (G.eliteWaveT === undefined ? 150 : G.eliteWaveT) - dt;
+  if (G.eliteWaveT <= 0) {
+    G.eliteWaveT = 150;
+    const cnt = 3 + Math.floor(m / 2);
+    for (let i = 0; i < cnt; i++) {
+      const a = (i / cnt) * TAU + rand(-0.2, 0.2);
+      const d = Math.max(G.view.w, G.view.h) * 0.66 + 60;
+      const x = p.x + Math.cos(a) * d, y = p.y + Math.sin(a) * d;
+      const b = MapGen.biome(Math.floor(x / TILE), Math.floor(y / TILE));
+      spawnEnemy(x, y, pickEnemyForBiome(b, tw), { elite: true });
+    }
+    showBanner('⚠️ 정예 웨이브!!', '#ffa500');
+    SFX.play('warn');
+  }
+
+  // 도파민 결정 클러스터 스폰 (맵 상호작용)
+  G.crystalT = (G.crystalT === undefined ? 12 : G.crystalT) - dt;
+  if (G.crystalT <= 0) {
+    G.crystalT = rand(14, 22);
+    if (G.crystals.length < 4) {
+      for (let tries = 0; tries < 8; tries++) {
+        const a = Math.random() * TAU;
+        const d = rand(480, 900);
+        const x = p.x + Math.cos(a) * d, y = p.y + Math.sin(a) * d;
+        const b = MapGen.biome(Math.floor(x / TILE), Math.floor(y / TILE));
+        if (b !== B_WATER && b !== B_LAVA) {
+          G.crystals.push({
+            x, y, hp: 80 + m * 14, maxHp: 80 + m * 14, r: 26,
+            hue: rand(260, 330), flash: 0, wobble: Math.random() * TAU,
+            shards: Array.from({ length: 3 + randi(0, 2) }, () => ({
+              ox: rand(-16, 16), oy: rand(-8, 10), s: rand(0.6, 1.25), tilt: rand(-0.3, 0.3),
+            })),
+          });
+          break;
+        }
+      }
+    }
+  }
+
   // 보스 스폰 (5/10/15/20분)
   for (const bd of BOSSES) {
     if (G.minute >= bd.min && !G.bossSpawned.has(bd.min)) {
@@ -182,6 +226,22 @@ function nearestEnemy(x, y, maxR = 700, excludeSet) {
   return best;
 }
 
+/* 적 + 결정 통합 타겟 (무기가 결정도 조준하게) */
+function nearestTarget(x, y, maxR = 700, excludeSet) {
+  let best = null, bd = maxR * maxR;
+  for (const e of G.enemies) {
+    if (excludeSet && excludeSet.has(e)) continue;
+    const d = dist2(x, y, e.x, e.y);
+    if (d < bd) { bd = d; best = e; }
+  }
+  for (const c of G.crystals) {
+    if (excludeSet && excludeSet.has(c)) continue;
+    const d = dist2(x, y, c.x, c.y);
+    if (d < bd) { bd = d; best = c; }
+  }
+  return best;
+}
+
 /* 적 업데이트 */
 function updateEnemies(dt) {
   const p = G.player;
@@ -200,11 +260,45 @@ function updateEnemies(dt) {
     e.wobble += dt * 6;
 
     let sp = e.spd * (e.slow > 0 ? 0.55 : 1) * MapGen.groundSpeed(e.x, e.y);
+    if (G.rage.active) sp *= 0.45; // 도파민 러시 중엔 적이 느려짐
 
     if (e.stun > 0) { e.vx = 0; e.vy = 0; }
     else {
       const dx = p.x - e.x, dy = p.y - e.y;
       const d = Math.hypot(dx, dy) || 1;
+
+      // 돌진러: 조준 → 돌진 → 휴식 사이클
+      if (e.type === 'charger' && !e.boss) {
+        e.aiT = (e.aiT || 0) - dt;
+        if (e.chargeState === 'telegraph') {
+          e.tele -= dt;
+          sp = 0;
+          e.x += rand(-0.6, 0.6); e.y += rand(-0.6, 0.6); // 떨림 예고
+          if (e.tele <= 0) { e.chargeState = 'dash'; e.dashT = 0.55; e.dashAng = Math.atan2(dy, dx); SFX.play('dash'); }
+        } else if (e.chargeState === 'dash') {
+          e.dashT -= dt;
+          e.x += Math.cos(e.dashAng) * sp * 3.4 * dt;
+          e.y += Math.sin(e.dashAng) * sp * 3.4 * dt;
+          if (e.dashT <= 0) { e.chargeState = 'rest'; e.restT = 1.7; }
+          sp = 0;
+        } else {
+          e.restT = (e.restT || 0) - dt;
+          if (d < 300 && e.restT <= 0) { e.chargeState = 'telegraph'; e.tele = 0.7; SFX.play('charge'); }
+        }
+      }
+
+      // 뱉는놈: 거리 유지 + 원거리 공격
+      if (e.type === 'spitter' && !e.boss) {
+        e.shootCd = (e.shootCd || rand(1, 2.4)) - dt;
+        if (d < 210) sp *= -0.7;                       // 너무 가까우면 후퇴
+        else if (d < 330) sp *= 0.12;                  // 적정 거리에선 거의 정지
+        if (e.shootCd <= 0 && d < 560) {
+          e.shootCd = 2.4;
+          const a2 = ang(e.x, e.y, p.x, p.y);
+          G.eProjectiles.push({ x: e.x, y: e.y, vx: Math.cos(a2) * 250, vy: Math.sin(a2) * 250, r: 8, dmg: e.dmg * 0.7, life: 3.4, color: '#a3ff5e' });
+          SFX.play('shoot');
+        }
+      }
 
       // 보스 패턴
       if (e.boss) {
@@ -289,10 +383,24 @@ function killEnemy(e) {
   if (idx < 0) return;
   G.enemies.splice(idx, 1);
 
+  // 도파민 러시 게이지 충전
+  if (G.rage) {
+    G.rage.value = Math.min(G.rage.max, G.rage.value + (e.boss ? 35 : e.elite ? 10 : 1.7));
+  }
+
+  // 분열 슬라임 → 꼬마 2마리 분열
+  if (e.type === 'splitter') {
+    for (let i = 0; i < 2; i++) {
+      const m = spawnEnemy(e.x + rand(-20, 20), e.y + rand(-20, 20), 'splitling', {});
+      m.hp = m.maxHp = Math.max(5, m.maxHp * 0.7);
+    }
+  }
+
   G.stats.kills++;
   addCombo();
   SFX.play('kill');
   shakeCam(e.boss ? 20 : (e.elite ? 5 : 1.4));
+  if (e.elite) G.hitStop = Math.max(G.hitStop, 0.07); // 엘리트 킬 펀치
 
   // 파티클 폭발
   const n = e.boss ? 60 : (e.elite ? 26 : 12);
@@ -532,6 +640,68 @@ function drawEnemy(ctx, e) {
       drawEyes(ctx, 0, 0, r * 0.8, dx, false);
       break;
     }
+    case 'charger': {
+      // 조준 중엔 빨갛게 부풀어 오름
+      const tele = e.chargeState === 'telegraph';
+      ctx.fillStyle = e.flash > 0.4 ? '#fff' : (tele ? '#ff2d2d' : body);
+      if (tele) {
+        ctx.save();
+        ctx.scale(1 + Math.sin(e.wobble * 8) * 0.12, 1 + Math.cos(e.wobble * 8) * 0.12);
+        ctx.beginPath(); ctx.arc(0, 0, r * 0.9, 0, TAU); ctx.fill();
+        ctx.restore();
+        // 경고 마커
+        ctx.strokeStyle = 'rgba(255,45,45,0.85)'; ctx.lineWidth = 2.4;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath(); ctx.arc(0, 0, r + 9, 0, TAU); ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        // 뿔 달린 진영형
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.9, r * 0.5); ctx.lineTo(-r * 0.55, -r * 0.75); ctx.lineTo(0, -r * 0.95);
+        ctx.lineTo(r * 0.55, -r * 0.75); ctx.lineTo(r * 0.9, r * 0.5); ctx.lineTo(0, r * 0.75);
+        ctx.closePath(); ctx.fill();
+        // 뿔
+        ctx.fillStyle = '#ffe3b3';
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.5, -r * 0.6); ctx.lineTo(-r * 0.9, -r * 1.25); ctx.lineTo(-r * 0.15, -r * 0.8);
+        ctx.moveTo(r * 0.5, -r * 0.6); ctx.lineTo(r * 0.9, -r * 1.25); ctx.lineTo(r * 0.15, -r * 0.8);
+        ctx.fill();
+      }
+      drawEyes(ctx, 0, -r * 0.15, r * 0.85, dx, false);
+      break;
+    }
+    case 'spitter': {
+      // 식물형 뱉는놈
+      ctx.fillStyle = '#3a7d2c';
+      ctx.fillRect(-r * 0.14, -r * 0.1, r * 0.28, r * 0.85);
+      const open = e.shootCd !== undefined && e.shootCd < 0.35 ? 1 : 0;
+      ctx.fillStyle = e.flash > 0.4 ? '#fff' : body;
+      ctx.beginPath(); ctx.arc(0, -r * 0.35, r * 0.78, 0, TAU); ctx.fill();
+      // 입 (쏘기 직전 벌어짐)
+      ctx.fillStyle = '#1d4a14';
+      ctx.beginPath();
+      ctx.arc(0, -r * 0.35, r * (0.3 + open * 0.22), 0, TAU); ctx.fill();
+      // 잎
+      ctx.fillStyle = '#4f9e3a';
+      ctx.beginPath(); ctx.ellipse(-r * 0.75, -r * 0.9, r * 0.3, r * 0.14, -0.7, 0, TAU); ctx.fill();
+      drawEyes(ctx, 0, -r * 0.55, r * 0.78, dx, false);
+      break;
+    }
+    case 'splitter': case 'splitling': {
+      // 두 동강 날 것 같은 슬라임 (중앙 접힘선)
+      ctx.fillStyle = e.flash > 0.4 ? '#fff' : body;
+      ctx.beginPath();
+      ctx.moveTo(-r, r * 0.62);
+      ctx.quadraticCurveTo(-r * 1.05, -r * 1.05, -r * 0.12, -r * 0.98);
+      ctx.lineTo(r * 0.12, -r * 0.98);
+      ctx.quadraticCurveTo(r * 1.05, -r * 1.05, r, r * 0.62);
+      ctx.quadraticCurveTo(0, r * 0.95, -r, r * 0.62);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(20,80,50,0.55)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(0, -r * 0.95); ctx.lineTo(0, r * 0.7); ctx.stroke();
+      drawEyes(ctx, 0, -r * 0.1, r, dx, false);
+      break;
+    }
     default: {
       ctx.fillStyle = body;
       ctx.beginPath(); ctx.arc(0, 0, r * 0.85, 0, TAU); ctx.fill();
@@ -564,4 +734,114 @@ function drawCrown(ctx, x, y, s) {
   ctx.fill();
   ctx.fillStyle = '#ff5d8f';
   ctx.beginPath(); ctx.arc(x, y - s * 0.45, s * 0.14, 0, TAU); ctx.fill();
+}
+
+/* ============================================================
+ * 도파민 결정 클러스터 — 파괴하면 젬 분수!
+ * ============================================================ */
+
+function queryCrystals(x, y, r) {
+  const out = [];
+  const r2 = r * r;
+  for (const c of G.crystals) {
+    if (dist2(c.x, c.y, x, y) <= (r + c.r) * (r + c.r)) out.push(c);
+  }
+  return out;
+}
+
+function damageCrystal(c, dmg) {
+  c.hp -= dmg;
+  c.flash = 1;
+  SFX.play('crystalhit');
+  spawnDmgText(c.x + rand(-12, 12), c.y - 20, Math.round(dmg), false);
+  if (c.hp <= 0) shatterCrystal(c);
+}
+
+function shatterCrystal(c) {
+  const idx = G.crystals.indexOf(c);
+  if (idx < 0) return;
+  G.crystals.splice(idx, 1);
+  SFX.play('crystal');
+  shakeCam(7);
+  showBanner('💠 도파민 결정 파괴!', `hsl(${c.hue},100%,70%)`);
+
+  // 젬 분수!
+  const n = randi(16, 24);
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * TAU;
+    G.pickups.push({
+      kind: 'gem', x: c.x, y: c.y,
+      val: choice([1, 1, 2, 3]), t: Math.random() * TAU,
+      vx: Math.cos(a) * rand(120, 320), vy: Math.sin(a) * rand(120, 320),
+    });
+  }
+  if (Math.random() < 0.25) {
+    G.pickups.push({ kind: 'magnet', x: c.x, y: c.y - 6, val: 0, t: 0, vx: 0, vy: 0 });
+  }
+  if (Math.random() < 0.06) {
+    G.pickups.push({ kind: 'chest', x: c.x, y: c.y - 10, val: 3, t: 0, vx: 0, vy: 0 });
+  }
+  // 유리 파편 파티클
+  for (let i = 0; i < 42; i++) {
+    const a = Math.random() * TAU, s = rand(80, 420);
+    G.particles.push({
+      x: c.x, y: c.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 80,
+      life: rand(0.4, 0.9), maxLife: 0.9, size: rand(2, 6),
+      color: `hsl(${c.hue + rand(-30, 30)},100%,${rand(55, 80)}%)`, grav: 380,
+    });
+  }
+}
+
+function updateCrystals(dt) {
+  for (let i = G.crystals.length - 1; i >= 0; i--) {
+    const c = G.crystals[i];
+    c.flash = Math.max(0, c.flash - dt * 5);
+    c.wobble += dt * 2;
+    // 너무 멀면 제거
+    if (dist2(c.x, c.y, G.player.x, G.player.y) > 2400 * 2400) G.crystals.splice(i, 1);
+  }
+}
+
+function drawCrystal(ctx, c) {
+  ctx.save();
+  ctx.translate(c.x, c.y);
+  // 바닥 발광
+  const pulse = 1 + Math.sin(c.wobble) * 0.12;
+  const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, 52 * pulse);
+  glow.addColorStop(0, `hsla(${c.hue},100%,70%,0.5)`);
+  glow.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = glow;
+  ctx.beginPath(); ctx.arc(0, 0, 52 * pulse, 0, TAU); ctx.fill();
+  // 그림자
+  ctx.fillStyle = 'rgba(0,0,0,0.28)';
+  ctx.beginPath(); ctx.ellipse(0, 10, 24, 8, 0, 0, TAU); ctx.fill();
+  // 결정 조각들
+  for (const sh of c.shards) {
+    ctx.save();
+    ctx.translate(sh.ox, sh.oy);
+    ctx.rotate(sh.tilt + Math.sin(c.wobble + sh.ox) * 0.05);
+    ctx.scale(sh.s, sh.s);
+    const grad = ctx.createLinearGradient(0, -34, 0, 8);
+    if (c.flash > 0.3) {
+      grad.addColorStop(0, '#ffffff'); grad.addColorStop(1, '#ffffff');
+    } else {
+      grad.addColorStop(0, `hsl(${c.hue},100%,82%)`);
+      grad.addColorStop(1, `hsl(${c.hue},90%,48%)`);
+    }
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(0, -34); ctx.lineTo(-11, -10); ctx.lineTo(-5, 8); ctx.lineTo(6, 8); ctx.lineTo(12, -12);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.beginPath(); ctx.moveTo(0, -34); ctx.lineTo(-5, -10); ctx.lineTo(-1, 4); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+  // 체력바
+  if (c.hp < c.maxHp) {
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    MapGen.rr(ctx, c.x - 26, c.y - 44, 52, 6, 3); ctx.fill();
+    ctx.fillStyle = `hsl(${c.hue},100%,65%)`;
+    MapGen.rr(ctx, c.x - 25, c.y - 43, 50 * clamp(c.hp / c.maxHp, 0, 1), 4, 2); ctx.fill();
+  }
 }

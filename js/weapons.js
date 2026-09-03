@@ -84,6 +84,31 @@ const WEAPON_DEFS = {
 };
 const WLV = WEAPON_DEFS; // desc 내부 참조용
 
+/* 무기 진화: 만렙(5) 무기가 보물 상자에서 슈퍼 무기로! */
+const EVOLUTIONS = {
+  bolt: { name: '플루토늄 스타', emoji: '🌟', desc: '관통 + 폭발하는 무지개 마탄',
+    mods: { count: 5, dmg: 42, cd: 0.62, pierce: 2, explode: 46 } },
+  orbit: { name: '심연의 회전문', emoji: '⚔️', desc: '적을 빨아들이는 황금 검풍',
+    mods: { count: 7, dmg: 46, r: 150, spd: 4.4, vacuum: true } },
+  lightning: { name: '천벌', emoji: '🌩️', desc: '연쇄하는 심판의 뇌격',
+    mods: { count: 6, dmg: 60, cd: 1.2, aoe: 110, chain: 3 } },
+  aura: { name: '도파민 폭풍', emoji: '🌸', desc: '적을 밀어내는 무지개 성역',
+    mods: { r: 250, dmg: 34, tick: 0.3, knock: true } },
+  boomerang: { name: '차원 부메랑', emoji: '🌀', desc: '돌아올 때 잔영으로 분열',
+    mods: { count: 4, dmg: 56, cd: 1.1, range: 430, spd: 760, split: true } },
+  grenade: { name: '미니엄 포', emoji: '☄️', desc: '산탄 폭발하는 초대형 유탄',
+    mods: { count: 4, dmg: 110, cd: 1.9, aoe: 165, cluster: 4 } },
+  lance: { name: '프리즘 레이저', emoji: '🌈', desc: '8방위로 쏟아지는 관통 광선',
+    mods: { count: 8, dmg: 92, cd: 1.15, w: 52, omni: true } },
+};
+
+/* 무기 실제 스탯 (진화 반영) */
+function wstats(id, w) {
+  const st = Object.assign({}, WEAPON_DEFS[id].lvls[w.lvl - 1]);
+  if (w.evolved) Object.assign(st, EVOLUTIONS[id].mods);
+  return st;
+}
+
 /* 무기 상태 초기화 (플레이어 시작 무기: 매직 볼트) */
 function initWeapons() {
   G.weapons = { bolt: { lvl: 1, cd: 0 } };
@@ -92,7 +117,7 @@ function initWeapons() {
   G.fx = { bolts: [] }; // 번개 시각 효과
 }
 
-function weaponDmgMult() { return 1 + G.passives.power * 0.12; }
+function weaponDmgMult() { return (1 + G.passives.power * 0.12) * (G.rage && G.rage.active ? 2 : 1); }
 function cooldownMult() { return Math.pow(0.93, G.passives.haste); }
 
 function updateWeapons(dt) {
@@ -103,7 +128,7 @@ function updateWeapons(dt) {
 
   for (const id in G.weapons) {
     const w = G.weapons[id];
-    const lv = WEAPON_DEFS[id].lvls[w.lvl - 1];
+    const lv = wstats(id, w);
     w.cd -= dt;
 
     if (id === 'orbit' || id === 'aura') continue; // 상시 무기
@@ -114,26 +139,39 @@ function updateWeapons(dt) {
     }
   }
 
-  /* 궤도 검: 상시 회전 + 접촉 피해 */
+  /* 궤도 검: 상시 회전 + 접촉 피해 (+진화 시 흡인) */
   if (G.weapons.orbit) {
-    const lv = WEAPON_DEFS.orbit.lvls[G.weapons.orbit.lvl - 1];
+    const lv = wstats('orbit', G.weapons.orbit);
+    // 진화: 적 흡인
+    if (lv.vacuum) {
+      for (const e of G.enemies) {
+        const d = dist(e.x, e.y, p.x, p.y);
+        if (d < lv.r + 60 && d > 20) {
+          e.x += (p.x - e.x) / d * 95 * dt;
+          e.y += (p.y - e.y) / d * 95 * dt;
+        }
+      }
+    }
     for (let i = 0; i < lv.count; i++) {
       const a = G.orbitAngle * lv.spd / 3 + (i / lv.count) * TAU;
       const ox = p.x + Math.cos(a) * lv.r, oy = p.y + Math.sin(a) * lv.r;
-      const targets = queryEnemies(ox, oy, 22);
-      for (const e of targets) {
+      for (const e of queryEnemies(ox, oy, 24)) {
         const last = e.hitBy.get('orbit') || 0;
         if (G.time - last > 0.42) {
           e.hitBy.set('orbit', G.time);
           damageEnemy(e, lv.dmg * dmgM, true, a);
         }
       }
+      for (const c of queryCrystals(ox, oy, 24)) {
+        const last = c.hitOrbit || 0;
+        if (G.time - last > 0.4) { c.hitOrbit = G.time; damageCrystal(c, lv.dmg * dmgM); }
+      }
     }
   }
 
   /* 오라: 반경 내 틱 피해 */
   if (G.weapons.aura) {
-    const lv = WEAPON_DEFS.aura.lvls[G.weapons.aura.lvl - 1];
+    const lv = wstats('aura', G.weapons.aura);
     G.auraTick -= dt;
     if (G.auraTick <= 0) {
       G.auraTick = lv.tick;
@@ -141,6 +179,16 @@ function updateWeapons(dt) {
       let hitAny = false;
       for (const e of targets) {
         damageEnemy(e, lv.dmg * dmgM, true, null);
+        if (lv.knock) { // 진화: 밀어내기
+          const d = dist(e.x, e.y, p.x, p.y) || 1;
+          e.x += (e.x - p.x) / d * 16;
+          e.y += (e.y - p.y) / d * 16;
+          e.stun = Math.max(e.stun, 0.12);
+        }
+        hitAny = true;
+      }
+      for (const c of queryCrystals(p.x, p.y, lv.r)) {
+        damageCrystal(c, lv.dmg * dmgM);
         hitAny = true;
       }
       if (hitAny) G.auraPulse = 1;
@@ -155,50 +203,46 @@ function fireWeapon(id, lv, dmgM) {
     case 'bolt': {
       const used = new Set();
       for (let i = 0; i < lv.count; i++) {
-        const t = nearestEnemy(p.x, p.y, 650, used);
+        const t = nearestTarget(p.x, p.y, 650, used);
         if (!t) break;
         used.add(t);
         const a = ang(p.x, p.y, t.x, t.y) + rand(-0.06, 0.06);
         G.projectiles.push({
           kind: 'bolt', x: p.x, y: p.y,
           vx: Math.cos(a) * 560, vy: Math.sin(a) * 560,
-          r: 7, dmg: lv.dmg * dmgM, life: 1.6,
-          target: t, color: WEAPON_DEFS.bolt.color, trail: [],
+          r: lv.explode ? 10 : 7, dmg: lv.dmg * dmgM, life: 1.6,
+          target: t, color: WEAPON_DEFS.bolt.color,
+          trail: [], pierce: lv.pierce || 0, explode: lv.explode || 0,
+          hitSet: new Map(),
         });
       }
       if (used.size) SFX.play('shoot');
       break;
     }
     case 'lightning': {
-      const cands = G.enemies.filter(e => dist2(e.x, e.y, p.x, p.y) < 380 * 380);
+      // 결정도 후보에 포함 (번개는 결정도 친다!)
+      const cands = G.enemies.filter(e => dist2(e.x, e.y, p.x, p.y) < 380 * 380)
+        .concat(G.crystals.filter(c => dist2(c.x, c.y, p.x, p.y) < 380 * 380).map(c => ({ crystal: c, x: c.x, y: c.y })));
       if (!cands.length) return;
+      const chained = new Set();
       for (let i = 0; i < lv.count; i++) {
-        const t = cands[(Math.random() * cands.length) | 0];
-        if (!t) break;
-        G.fx.bolts.push({ x: t.x, y: t.y, life: 0.28, maxLife: 0.28 });
-        SFX.play('thunder');
-        shakeCam(2.5);
-        for (const e of queryEnemies(t.x, t.y, lv.aoe)) {
-          damageEnemy(e, lv.dmg * dmgM, true, null);
-          e.stun = Math.max(e.stun, 0.25);
-        }
-        for (let k = 0; k < 8; k++) {
-          const a2 = Math.random() * TAU;
-          G.particles.push({ x: t.x, y: t.y, vx: Math.cos(a2) * rand(80, 220), vy: Math.sin(a2) * rand(80, 220) - 60, life: 0.35, maxLife: 0.35, size: 3, color: '#ffe14d', grav: 300 });
-        }
+        const pick = cands[(Math.random() * cands.length) | 0];
+        if (!pick) break;
+        strikeLightning(pick.x, pick.y, lv, dmgM, chained);
       }
       break;
     }
     case 'boomerang': {
       for (let i = 0; i < lv.count; i++) {
-        const t = nearestEnemy(p.x, p.y, 700);
+        const t = nearestTarget(p.x, p.y, 700);
         const a = t ? ang(p.x, p.y, t.x, t.y) : Math.random() * TAU;
         G.projectiles.push({
           kind: 'boomerang', x: p.x, y: p.y,
           vx: Math.cos(a) * lv.spd, vy: Math.sin(a) * lv.spd,
-          r: 14, dmg: lv.dmg * dmgM, life: 5,
+          r: lv.split ? 17 : 14, dmg: lv.dmg * dmgM, life: 5,
           phase: 'out', dist: 0, range: lv.range, spd: lv.spd,
           spin: 0, hitSet: new Map(), color: WEAPON_DEFS.boomerang.color,
+          split: lv.split || false, isMini: false,
         });
       }
       SFX.play('shoot');
@@ -218,24 +262,62 @@ function fireWeapon(id, lv, dmgM) {
           sx: p.x, sy: p.y, tx, ty, t: 0, dur,
           r: 10, dmg: lv.dmg * dmgM, life: dur + 0.05,
           aoe: lv.aoe, color: WEAPON_DEFS.grenade.color,
+          cluster: lv.cluster || 0,
         });
       }
       break;
     }
     case 'lance': {
       const dirA = Math.atan2(p.faceY, p.faceX) || 0;
-      for (let i = 0; i < lv.count; i++) {
-        const off = lv.count > 1 ? (i === 0 ? -26 : 26) : 0;
-        const px2 = -Math.sin(dirA) * off, py2 = Math.cos(dirA) * off;
+      const n = lv.count;
+      for (let i = 0; i < n; i++) {
+        // 진화(omni): 8방위 / 일반: 이동 방향 + 병렬
+        const a = lv.omni ? (i / n) * TAU
+          : dirA + (n > 1 ? (i === 0 ? 0 : (i === 1 ? 0.02 : -0.02)) : 0);
+        const off = lv.omni ? 0 : (n > 1 ? (i === 0 ? -26 : 26) : 0);
+        const px2 = lv.omni ? 0 : -Math.sin(dirA) * off;
+        const py2 = lv.omni ? 0 : Math.cos(dirA) * off;
         G.projectiles.push({
           kind: 'lance', x: p.x + px2, y: p.y + py2,
-          vx: Math.cos(dirA) * 950, vy: Math.sin(dirA) * 950,
+          vx: Math.cos(a) * 950, vy: Math.sin(a) * 950,
           r: lv.w / 2, dmg: lv.dmg * dmgM, life: 0.62,
           w: lv.w, hitSet: new Map(), color: WEAPON_DEFS.lance.color,
         });
       }
       SFX.play('laser');
       break;
+    }
+  }
+}
+
+/* 번개 1회 낙하 (+진화 시 연쇄) */
+function strikeLightning(x, y, lv, dmgM, chained) {
+  G.fx.bolts.push({ x, y, life: 0.28, maxLife: 0.28 });
+  SFX.play('thunder');
+  shakeCam(2.5);
+  let hitSomething = false;
+  for (const e of queryEnemies(x, y, lv.aoe)) {
+    damageEnemy(e, lv.dmg * dmgM, true, null);
+    e.stun = Math.max(e.stun, 0.25);
+    hitSomething = true;
+  }
+  for (const c of queryCrystals(x, y, lv.aoe)) {
+    damageCrystal(c, lv.dmg * dmgM);
+    hitSomething = true;
+  }
+  if (hitSomething) {
+    for (let k = 0; k < 8; k++) {
+      const a2 = Math.random() * TAU;
+      G.particles.push({ x, y, vx: Math.cos(a2) * rand(80, 220), vy: Math.sin(a2) * rand(80, 220) - 60, life: 0.35, maxLife: 0.35, size: 3, color: '#ffe14d', grav: 300 });
+    }
+  }
+  // 진화: 연쇄 뇌격
+  if (lv.chain && chained.size < lv.chain) {
+    const next = nearestEnemy(x, y, 220, chained);
+    if (next) {
+      chained.add(next);
+      G.fx.bolts.push({ x: next.x, y: next.y, life: 0.24, maxLife: 0.24 });
+      damageEnemy(next, lv.dmg * 0.6 * dmgM, true, null);
     }
   }
 }
@@ -248,8 +330,8 @@ function updateProjectiles(dt) {
     b.life -= dt;
 
     if (b.kind === 'bolt') {
-      // 경미한 유도
-      if (b.target && G.enemies.includes(b.target)) {
+      // 경미한 유도 (적·결정 모두 추적)
+      if (b.target && (G.enemies.includes(b.target) || G.crystals.includes(b.target))) {
         const cur = Math.atan2(b.vy, b.vx);
         const want = ang(b.x, b.y, b.target.x, b.target.y);
         let dA = want - cur;
@@ -262,14 +344,32 @@ function updateProjectiles(dt) {
       b.trail.push({ x: b.x, y: b.y });
       if (b.trail.length > 6) b.trail.shift();
       b.x += b.vx * dt; b.y += b.vy * dt;
-      const hits = queryEnemies(b.x, b.y, b.r);
+      if (b.remaining === undefined) b.remaining = b.pierce || 0;
       let dead = false;
-      for (const e of hits) {
+      for (const e of queryEnemies(b.x, b.y, b.r)) {
+        const last = b.hitSet.get(e);
+        if (last && G.time - last < 0.3) continue;
+        b.hitSet.set(e, G.time);
         damageEnemy(e, b.dmg, true, Math.atan2(b.vy, b.vx));
-        dead = true; break;
+        if (b.remaining-- <= 0) { dead = true; break; }
+      }
+      if (!dead) {
+        for (const c of queryCrystals(b.x, b.y, b.r)) {
+          damageCrystal(c, b.dmg);
+          if (b.remaining-- <= 0) dead = true;
+          break;
+        }
       }
       if (dead || b.life <= 0) {
         G.projectiles.splice(i, 1);
+        // 진화: 착탄 폭발
+        if (b.explode && dead) {
+          G.explosions.push({ x: b.x, y: b.y, r: b.explode, life: 0.3, maxLife: 0.3 });
+          for (const e of queryEnemies(b.x, b.y, b.explode)) damageEnemy(e, b.dmg * 0.6, true, null);
+          for (const c of queryCrystals(b.x, b.y, b.explode)) damageCrystal(c, b.dmg * 0.6);
+          SFX.play('boom');
+          shakeCam(2);
+        }
         for (let k = 0; k < 4; k++) {
           const a = Math.random() * TAU;
           G.particles.push({ x: b.x, y: b.y, vx: Math.cos(a) * 90, vy: Math.sin(a) * 90, life: 0.25, maxLife: 0.25, size: 2.5, color: b.color, grav: 0 });
@@ -281,7 +381,23 @@ function updateProjectiles(dt) {
       if (b.phase === 'out') {
         b.x += b.vx * dt; b.y += b.vy * dt;
         b.dist += b.spd * dt;
-        if (b.dist >= b.range) b.phase = 'back';
+        if (b.dist >= b.range) {
+          b.phase = 'back';
+          // 진화: 돌아올 때 잔영 분열
+          if (b.split && !b.isMini) {
+            for (let k = 0; k < 2; k++) {
+              const a = Math.random() * TAU;
+              G.projectiles.push({
+                kind: 'boomerang', x: b.x, y: b.y,
+                vx: Math.cos(a) * 520, vy: Math.sin(a) * 520,
+                r: 11, dmg: b.dmg * 0.5, life: 1.1,
+                phase: 'out', dist: 0, range: 170, spd: 520,
+                spin: 0, hitSet: new Map(), color: '#ffb0e0',
+                isMini: true,
+              });
+            }
+          }
+        }
       } else {
         const a = ang(b.x, b.y, p.x, p.y);
         b.x += Math.cos(a) * b.spd * 1.15 * dt;
@@ -293,6 +409,11 @@ function updateProjectiles(dt) {
         if (b.hitSet.has(e) && G.time - b.hitSet.get(e) < 0.5) continue;
         b.hitSet.set(e, G.time);
         damageEnemy(e, b.dmg, true, Math.atan2(b.vy, b.vx));
+      }
+      for (const c of queryCrystals(b.x, b.y, b.r)) {
+        if (b.hitCry === c && G.time - (b.hitCryT || 0) < 0.5) continue;
+        b.hitCry = c; b.hitCryT = G.time;
+        damageCrystal(c, b.dmg);
       }
       if (b.life <= 0) G.projectiles.splice(i, 1);
     }
@@ -310,6 +431,21 @@ function updateProjectiles(dt) {
         for (const e of queryEnemies(b.x, b.y, b.aoe)) {
           damageEnemy(e, b.dmg, true, null);
         }
+        for (const c of queryCrystals(b.x, b.y, b.aoe)) {
+          damageCrystal(c, b.dmg);
+        }
+        // 진화: 산탄 폭발
+        if (b.cluster) {
+          for (let k = 0; k < b.cluster; k++) {
+            const a = Math.random() * TAU, d = rand(55, 110);
+            G.projectiles.push({
+              kind: 'grenade', x: b.x, y: b.y,
+              sx: b.x, sy: b.y, tx: b.x + Math.cos(a) * d, ty: b.y + Math.sin(a) * d,
+              t: 0, dur: 0.35, r: 8, dmg: b.dmg * 0.55, life: 0.4,
+              aoe: b.aoe * 0.62, color: '#ff9a3d', cluster: 0,
+            });
+          }
+        }
         for (let k = 0; k < 22; k++) {
           const a = Math.random() * TAU;
           G.particles.push({ x: b.x, y: b.y, vx: Math.cos(a) * rand(100, 380), vy: Math.sin(a) * rand(100, 380), life: rand(0.3, 0.6), maxLife: 0.6, size: rand(3, 6), color: choice(['#ff6b35', '#ffd23f', '#ff5d5d']), grav: 200 });
@@ -323,6 +459,11 @@ function updateProjectiles(dt) {
         if (b.hitSet.has(e)) continue;
         b.hitSet.set(e, 1);
         damageEnemy(e, b.dmg, true, Math.atan2(b.vy, b.vx));
+      }
+      for (const c of queryCrystals(b.x, b.y, b.r + 8)) {
+        if (b.hitCry === c) continue;
+        b.hitCry = c;
+        damageCrystal(c, b.dmg);
       }
       if (b.life <= 0) G.projectiles.splice(i, 1);
     }
@@ -345,36 +486,51 @@ function drawProjectiles(ctx) {
 
   // 오라
   if (G.weapons.aura) {
-    const lv = WEAPON_DEFS.aura.lvls[G.weapons.aura.lvl - 1];
+    const lv = wstats('aura', G.weapons.aura);
+    const evolved = G.weapons.aura.evolved;
     const pulse = 1 + (G.auraPulse || 0) * 0.06;
     const r = lv.r * pulse;
+    const hue = (G.time * 140) % 360;
     const grad = ctx.createRadialGradient(p.x, p.y, r * 0.55, p.x, p.y, r);
-    grad.addColorStop(0, 'rgba(255,93,143,0)');
-    grad.addColorStop(0.75, `rgba(255,93,143,${0.10 + (G.auraPulse || 0) * 0.12})`);
-    grad.addColorStop(1, `rgba(255,93,143,${0.26 + (G.auraPulse || 0) * 0.2})`);
+    const col = evolved ? `hsla(${hue},100%,65%,` : 'rgba(255,93,143,';
+    grad.addColorStop(0, col + '0)');
+    grad.addColorStop(0.75, col + `${0.10 + (G.auraPulse || 0) * 0.12})`);
+    grad.addColorStop(1, col + `${0.26 + (G.auraPulse || 0) * 0.2})`);
     ctx.fillStyle = grad;
     ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, TAU); ctx.fill();
-    ctx.strokeStyle = `rgba(255,93,143,${0.45 + (G.auraPulse || 0) * 0.4})`;
+    ctx.strokeStyle = col + `${0.45 + (G.auraPulse || 0) * 0.4})`;
     ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, TAU); ctx.stroke();
   }
 
   // 궤도 검
   if (G.weapons.orbit) {
-    const lv = WEAPON_DEFS.orbit.lvls[G.weapons.orbit.lvl - 1];
+    const lv = wstats('orbit', G.weapons.orbit);
+    const evolved = G.weapons.orbit.evolved;
     for (let i = 0; i < lv.count; i++) {
       const a = G.orbitAngle * lv.spd / 3 + (i / lv.count) * TAU;
       const ox = p.x + Math.cos(a) * lv.r, oy = p.y + Math.sin(a) * lv.r;
       ctx.save();
       ctx.translate(ox, oy);
       ctx.rotate(a + Math.PI / 2 + Math.sin(G.orbitAngle * 3) * 0.3);
-      // 검 모양
-      ctx.fillStyle = '#e8eef5';
-      ctx.beginPath();
-      ctx.moveTo(0, -18); ctx.lineTo(4.5, -4); ctx.lineTo(3, 14); ctx.lineTo(-3, 14); ctx.lineTo(-4.5, -4);
-      ctx.closePath(); ctx.fill();
-      ctx.fillStyle = '#ffd23f';
-      ctx.fillRect(-7, 12, 14, 4);
+      if (evolved) {
+        // 황금 검 + 불꽃 잔상
+        ctx.shadowColor = '#ffd23f'; ctx.shadowBlur = 12;
+        ctx.fillStyle = '#ffd23f';
+        ctx.beginPath();
+        ctx.moveTo(0, -20); ctx.lineTo(5.5, -4); ctx.lineTo(3.5, 16); ctx.lineTo(-3.5, 16); ctx.lineTo(-5.5, -4);
+        ctx.closePath(); ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#fff3c4';
+        ctx.fillRect(-8, 14, 16, 4.5);
+      } else {
+        ctx.fillStyle = '#e8eef5';
+        ctx.beginPath();
+        ctx.moveTo(0, -18); ctx.lineTo(4.5, -4); ctx.lineTo(3, 14); ctx.lineTo(-3, 14); ctx.lineTo(-4.5, -4);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#ffd23f';
+        ctx.fillRect(-7, 12, 14, 4);
+      }
       ctx.restore();
     }
   }
@@ -414,18 +570,22 @@ function drawProjectiles(ctx) {
 
   for (const b of G.projectiles) {
     if (b.kind === 'bolt') {
+      // 진화 볼트는 무지개색
+      const boltCol = b.pierce ? `hsl(${(G.time * 400 + b.x) % 360},100%,65%)` : b.color;
       // 잔상
       for (let i = 0; i < b.trail.length; i++) {
         const t = b.trail[i];
-        ctx.fillStyle = `rgba(53,240,255,${i / b.trail.length * 0.35})`;
-        ctx.beginPath(); ctx.arc(t.x, t.y, 4, 0, TAU); ctx.fill();
+        ctx.globalAlpha = (i / b.trail.length) * 0.4;
+        ctx.fillStyle = boltCol;
+        ctx.beginPath(); ctx.arc(t.x, t.y, b.r * 0.6, 0, TAU); ctx.fill();
       }
-      const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, 14);
+      ctx.globalAlpha = 1;
+      const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r + 7);
       grad.addColorStop(0, '#ffffff');
-      grad.addColorStop(0.4, '#35f0ff');
-      grad.addColorStop(1, 'rgba(53,240,255,0)');
+      grad.addColorStop(0.4, boltCol);
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = grad;
-      ctx.beginPath(); ctx.arc(b.x, b.y, 14, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r + 7, 0, TAU); ctx.fill();
     }
     else if (b.kind === 'boomerang') {
       ctx.save();
