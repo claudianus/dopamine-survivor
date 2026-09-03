@@ -20,6 +20,8 @@ const ENEMY_TYPES = {
   spitter: { name: '뱉는놈',   biomes: [B_FOREST, B_SNOW, B_CRYSTAL], tier: 2, hp: 24, spd: 68, r: 16, dmg: 10, xp: 4, color: '#7ed957' },
   splitter:{ name: '분열 슬라임', biomes: [B_GRASS, B_FOREST, B_SAND], tier: 1, hp: 18, spd: 74, r: 17, dmg: 8, xp: 2, color: '#8ef0c0' },
   splitling:{ name: '꼬마 슬라임', biomes: [], tier: 1, hp: 7, spd: 98, r: 10, dmg: 5, xp: 1, color: '#b8ffd9' },
+  thief:  { name: '광산 도적', biomes: [B_CRYSTAL, B_ROCK, B_GRASS, B_DESERT, B_SNOW], tier: 2, hp: 40, spd: 148, r: 15, dmg: 6, xp: 3, color: '#e8b74a', special: 'thief' },
+  bomber: { name: '폭탄 박쥐', biomes: [B_VOLCANIC, B_FOREST, B_CRYSTAL], tier: 2, hp: 26, spd: 138, r: 14, dmg: 18, xp: 4, color: '#ff5a4d', special: 'bomber' },
 };
 
 const BOSSES = [
@@ -35,6 +37,7 @@ function pickEnemyForBiome(b, tierWeights) {
   for (const id in ENEMY_TYPES) {
     const t = ENEMY_TYPES[id];
     if (!t.biomes.includes(b)) continue;
+    if (t.special === 'thief') continue; // 도적은 전용 스포너로만
     pool.push({ id, w: tierWeights[t.tier] || 0.05 });
   }
   if (!pool.length) pool.push({ id: 'slime', w: 1 });
@@ -175,6 +178,20 @@ function updateSpawns(dt) {
     }
   }
 
+  // 광산 도적: 6분부터 주기적 출현 — 잡으면 젬 대량 (추격 사냥!)
+  if (m > 6) {
+    G.thiefT = (G.thiefT === undefined ? 30 : G.thiefT) - dt;
+    if (G.thiefT <= 0) {
+      G.thiefT = rand(28, 45);
+      const a = Math.random() * TAU;
+      const d2 = Math.max(G.view.w, G.view.h) * 0.55 + rand(40, 160);
+      const th = spawnEnemy(p.x + Math.cos(a) * d2, p.y + Math.sin(a) * d2, 'thief', {});
+      th.spawnT = 0.3;
+      showBanner('💰 광산 도적이 나타났다! 잡아라!', '#e8b74a');
+      SFX.play('pick');
+    }
+  }
+
   // 지형 위험물/기믹 유지 (탄력 버섯·폭발성 결정·간헐천)
   spawnMaintainHazards(dt);
 
@@ -270,10 +287,15 @@ function updateEnemies(dt) {
 
   let sp = e.spd * (e.slow > 0 ? 0.55 : 1) * MapGen.groundSpeed(e.x, e.y) * (e.spawnT > 0 ? 0.25 : 1);
   if (G.rage.active) sp *= 0.45; // 도파민 러시 중엔 적이 느려짐
+    if (G.frenzy) sp *= 1.4; // 광란의 밤
 
     if (e.stun > 0) { e.vx = 0; e.vy = 0; }
     else {
-      const dx = p.x - e.x, dy = p.y - e.y;
+      let dx = p.x - e.x, dy = p.y - e.y;
+      // 경비 AI: 둥지에서 플레이어가 멀면 홈으로 복귀/대기
+      if (e.guard && e.home && dist2(p.x, p.y, e.home.x, e.home.y) > 360 * 360) {
+        if (dist2(e.x, e.y, e.home.x, e.home.y) > 60 * 60) { dx = e.home.x - e.x; dy = e.home.y - e.y; }
+      }
       const d = Math.hypot(dx, dy) || 1;
 
       // 돌진러: 조준 → 돌진 → 휴식 사이클
@@ -306,6 +328,41 @@ function updateEnemies(dt) {
           const a2 = ang(e.x, e.y, p.x, p.y);
           G.eProjectiles.push({ x: e.x, y: e.y, vx: Math.cos(a2) * 250, vy: Math.sin(a2) * 250, r: 8, dmg: e.dmg * 0.7, life: 3.4, color: '#a3ff5e' });
           SFX.play('shoot');
+        }
+      }
+
+      // 광산 도적: 플레이어에게서 도망! 잡으면 젬 대량 드롭
+      if (e.type === 'thief') {
+        sp *= 1 + Math.sin(e.wobble * 0.6) * 0.08; // 흐느적거리는 도주
+        mvx = -mvx; mvy = -mvy;
+        // 도주 중 반짝이 젬 흘리기
+        if (Math.random() < dt * 3) {
+          G.particles.push({ x: e.x, y: e.y, vx: rand(-30, 30), vy: rand(-40, 0), life: 0.5, maxLife: 0.5, size: 2.5, color: '#ffe9a8', grav: 60, shape: 'spark' });
+        }
+      }
+
+      // 폭탄 박쥐: 접근하면 점화 → 자폭 (적에게도 피해)
+      if (e.type === 'bomber') {
+        if (e.fuseT !== undefined) {
+          e.fuseT -= dt;
+          sp = 0;
+          if (e.fuseT <= 0) {
+            // 자폭!
+            const idx2 = G.enemies.indexOf(e);
+            if (idx2 >= 0) G.enemies.splice(idx2, 1);
+            SFX.play('boom', e.x);
+            POST.triggerShock(e.x, e.y, 0.5);
+            kickCam(e.x - p.x, e.y - p.y, 6);
+            G.explosions.push({ x: e.x, y: e.y, r: 130, life: 0.4, maxLife: 0.4, color: '#ff5a4d' });
+            for (const o of queryEnemies(e.x, e.y, 100)) if (o !== e) damageEnemy(o, 55, true, null);
+            if (dist2(e.x, e.y, p.x, p.y) < 100 * 100 && p.iFrames <= 0) { hurtPlayer(e.dmg, e.x, e.y); p.iFrames = 0.5; }
+            shardBurst(e.x, e.y, '#ff5a4d', 16, 380, 5);
+            G.stats.kills++; addCombo();
+            continue;
+          }
+        } else if (d < 70) {
+          e.fuseT = 0.55;
+          SFX.play('charge', e.x);
         }
       }
 
@@ -364,6 +421,10 @@ function updateEnemies(dt) {
     if (pd < (e.r + p.r) * (e.r + p.r) && p.iFrames <= 0) {
       hurtPlayer(e.dmg, e.x, e.y);
       p.iFrames = 0.7;
+      // 가시 갑주: 접촉한 적에게 반사 피해
+      if (G.passives.thorns > 0 && !e.boss) {
+        damageEnemy(e, 10 + G.passives.thorns * 9, true, null);
+      }
       // 넉백
       const d = Math.sqrt(pd) || 1;
       e.x -= (p.x - e.x) / d * 18; e.y -= (p.y - e.y) / d * 18;
@@ -407,6 +468,7 @@ function killEnemy(e) {
     }
   }
 
+  QUESTS.onKill(e);
   G.stats.kills++;
   addCombo();
   SFX.play('kill', e.x);
@@ -444,7 +506,14 @@ function killEnemy(e) {
 
   // 젬 드롭
   const gemVal = e.boss ? 50 : e.xp;
-  const gemCount = e.boss ? 6 : 1;
+  let gemCount = e.boss ? 6 : 1;
+  // 광산 도적: 젬 자루 터뜨리며 사망!
+  if (e.type === 'thief') {
+    gemCount = randi(10, 16);
+    showBanner('💰 도적 사냥 성공! 젬 자루 획득!', '#ffd76a');
+    SFX.play('chest');
+    POST.triggerFlash(0.06);
+  }
   for (let i = 0; i < gemCount; i++) {
     G.pickups.push({
       kind: 'gem', x: e.x + rand(-e.r, e.r), y: e.y + rand(-e.r, e.r),
@@ -775,6 +844,55 @@ function drawEnemy(ctx, e) {
       drawMenaceEyes(ctx, 0, -r * 0.1, r, glowCol, dx);
       break;
     }
+    case 'thief': {
+      // 후드 쓴 도적 + 젬 자루 (도주 자세로 기울어짐)
+      const lean = clamp(-dx * 0.004, -0.3, 0.3);
+      ctx.save();
+      ctx.rotate(lean);
+      ctx.fillStyle = 'rgba(0,0,0,0.38)';
+      ctx.beginPath(); ctx.ellipse(0, e.r * 0.8, e.r * 0.8, e.r * 0.3, 0, 0, TAU); ctx.fill();
+      // 몸통
+      ctx.fillStyle = body;
+      ctx.beginPath();
+      ctx.moveTo(-e.r * 0.7, e.r * 0.55); ctx.lineTo(-e.r * 0.85, -e.r * 0.4);
+      ctx.lineTo(0, -e.r * 0.95); ctx.lineTo(e.r * 0.85, -e.r * 0.4); ctx.lineTo(e.r * 0.7, e.r * 0.55);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = glowCol; ctx.lineWidth = 1.6; ctx.stroke();
+      // 후드
+      ctx.fillStyle = darken(e.color, 0.35);
+      ctx.beginPath(); ctx.arc(0, -e.r * 0.55, e.r * 0.5, Math.PI * 0.9, Math.PI * 2.1); ctx.fill();
+      // 젬 자루 (등에 매고 도망)
+      ctx.fillStyle = '#6e4a1e';
+      MapGen.rr(ctx, e.r * 0.5, -e.r * 0.3, e.r * 0.7, e.r * 0.9, 3); ctx.fill();
+      ctx.fillStyle = '#ffe9a8';
+      ctx.beginPath(); ctx.arc(e.r * 0.85, e.r * 0.15, 2.2, 0, TAU); ctx.fill();
+      ctx.restore();
+      drawMenaceEyes(ctx, 0, -e.r * 0.5, e.r * 0.9, glowCol, dx);
+      break;
+    }
+    case 'bomber': {
+      const fused = e.fuseT !== undefined;
+      const flashRate = fused ? Math.sin(G.time * 30) > 0 : false;
+      const flap = Math.sin(e.wobble * 3);
+      ctx.fillStyle = e.flash > 0.4 ? '#fff' : (flashRate ? '#ffffff' : body);
+      // 날개
+      ctx.beginPath();
+      ctx.moveTo(-e.r * 0.4, 0); ctx.lineTo(-e.r * 1.8, -flap * e.r * 0.9 - e.r * 0.2); ctx.lineTo(-e.r * 0.5, e.r * 0.4);
+      ctx.moveTo(e.r * 0.4, 0); ctx.lineTo(e.r * 1.8, -flap * e.r * 0.9 - e.r * 0.2); ctx.lineTo(e.r * 0.5, e.r * 0.4);
+      ctx.fill();
+      // 둥근 폭탄 몸통
+      ctx.beginPath(); ctx.arc(0, 0, e.r * 0.85, 0, TAU); ctx.fill();
+      ctx.strokeStyle = fused ? '#ff3b2d' : glowCol;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      if (fused) {
+        ctx.globalCompositeOperation = 'lighter';
+        Glow.draw(ctx, '#ff3b2d', 0, 0, e.r * 2.4, 0.5 + flashRate * 0.3);
+        ctx.globalCompositeOperation = 'source-over';
+      }
+      drawMenaceEyes(ctx, 0, -e.r * 0.1, e.r * 0.85, glowCol, dx);
+      break;
+    }
     default: {
       ctx.fillStyle = body;
       ctx.beginPath(); ctx.arc(0, 0, r * 0.85, 0, TAU); ctx.fill();
@@ -1083,6 +1201,7 @@ function shatterCrystal(c) {
   const idx = G.crystals.indexOf(c);
   if (idx < 0) return;
   G.crystals.splice(idx, 1);
+  QUESTS.onCrystal();
   SFX.play('crystal', c.x);
   kickCam(c.x - G.player.x, c.y - G.player.y, 5);
   showBanner('💠 도파민 결정 파괴!', `hsl(${c.hue},100%,70%)`);

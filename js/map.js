@@ -13,16 +13,16 @@ const B_WATER = 0, B_SAND = 1, B_GRASS = 2, B_FOREST = 3, B_SNOW = 4,
       B_DESERT = 5, B_VOLCANIC = 6, B_CRYSTAL = 7, B_ROCK = 8, B_LAVA = 9;
 
 const BIOME_INFO = {
-  [B_WATER]:   { name: '심연 호수', base: [26, 52, 96],  spd: 0.55 },
-  [B_SAND]:    { name: '해변',   base: [176, 152, 110], spd: 1.0 },
-  [B_GRASS]:   { name: '초원',   base: [54, 106, 74],   spd: 1.0 },
-  [B_FOREST]:  { name: '흑림',   base: [34, 78, 54],   spd: 0.95 },
-  [B_SNOW]:    { name: '설원',   base: [172, 186, 208], spd: 1.0 },
-  [B_DESERT]:  { name: '사막',   base: [158, 112, 68], spd: 1.0 },
-  [B_VOLCANIC]:{ name: '화산지대', base: [50, 36, 44], spd: 1.0 },
-  [B_CRYSTAL]: { name: '도파민 광산', base: [72, 48, 122], spd: 1.0 },
-  [B_ROCK]:    { name: '암석지대', base: [92, 96, 108], spd: 1.0 },
-  [B_LAVA]:    { name: '용암',   base: [255, 110, 40], spd: 0.85 },
+  [B_WATER]:   { name: '심연 호수', base: [30, 96, 168],  spd: 0.55 },
+  [B_SAND]:    { name: '해변',   base: [226, 180, 116], spd: 1.0 },
+  [B_GRASS]:   { name: '초원',   base: [74, 172, 98],   spd: 1.0 },
+  [B_FOREST]:  { name: '흑림',   base: [46, 126, 76],   spd: 0.95 },
+  [B_SNOW]:    { name: '설원',   base: [210, 226, 250], spd: 1.0 },
+  [B_DESERT]:  { name: '사막',   base: [214, 140, 76], spd: 1.0 },
+  [B_VOLCANIC]:{ name: '화산지대', base: [78, 46, 52], spd: 1.0 },
+  [B_CRYSTAL]: { name: '도파민 광산', base: [108, 64, 196], spd: 1.0 },
+  [B_ROCK]:    { name: '암석지대', base: [122, 126, 142], spd: 1.0 },
+  [B_LAVA]:    { name: '용암',   base: [255, 132, 46], spd: 0.85 },
 };
 
 const MapGen = {
@@ -382,8 +382,31 @@ const MapGen = {
     }
   },
 
-  /* ---------- 시네마틱 안개 레이어 ---------- */
-  fog: [],
+  /* ---------- POI(관심 지점): 지역 해시 기반 결정적 배치 ----------
+   * 지역 = 6x6 청크(3072px) 블록. 같은 시드면 항상 같은 곳에 같은 이벤트 존. */
+  poiFor(rx, ry) {
+    const h = hashi(rx * 13 + 7, ry * 7 + 3, this.seed + 99);
+    if (h > 0.34) return null; // 지역의 34%가 이벤트 존
+    const h2 = hashi(rx * 31 + 5, ry * 17 + 11, this.seed + 100);
+    const type = h2 < 0.45 ? 'nest' : (h2 < 0.72 ? 'spring' : 'ritual');
+    const ox = (hashi(rx, ry, this.seed + 101) - 0.5) * 1100;
+    const oy = (hashi(ry, rx, this.seed + 102) - 0.5) * 1100;
+    return { x: rx * 3072 + 1536 + ox, y: ry * 3072 + 1536 + oy, type, rx, ry };
+  },
+  poiNear(x, y, r) {
+    const out = [];
+    const rr = Math.ceil(r / 3072);
+    const crx = Math.floor(x / 3072), cry = Math.floor(y / 3072);
+    for (let ry = cry - rr; ry <= cry + rr; ry++) {
+      for (let rx = crx - rr; rx <= crx + rr; rx++) {
+        const p = this.poiFor(rx, ry);
+        if (p) out.push(p);
+      }
+    }
+    return out;
+  },
+
+  /* ---------- 시네마틱 안개 레이어 ---------- */  fog: [],
   initFog() {
     this.fog = [];
     for (let i = 0; i < 8; i++) {
@@ -447,9 +470,35 @@ const MapGen = {
       mctx.beginPath(); mctx.arc(mx, my, 5, 0, TAU); mctx.fill();
       mctx.strokeStyle = '#fff'; mctx.lineWidth = 1.6; mctx.stroke();
     }
+    // POI 아이콘 (둥지/샘/의식)
+    const pois = this.poiNear(px, py, 1800);
+    for (const poi of pois) {
+      const mx = (poi.x - px) / scale + W / 2, my = (poi.y - py) / scale + W / 2;
+      if (mx < 4 || my < 4 || mx > W - 4 || my > W - 4) continue;
+      const c = poi.type === 'nest' ? '#ff3b5c' : (poi.type === 'spring' ? '#ffd23f' : '#b06cff');
+      const cleared = G.poisCleared && G.poisCleared.has(poi.rx + ',' + poi.ry);
+      mctx.globalAlpha = cleared ? 0.35 : 1;
+      mctx.fillStyle = c;
+      mctx.save();
+      mctx.translate(mx, my);
+      mctx.rotate(Math.PI / 4);
+      mctx.fillRect(-3, -3, 6, 6);
+      mctx.restore();
+      mctx.globalAlpha = 1;
+    }
+    // 퀘스트 목적지 마커
+    if (G.questTarget) {
+      const mx = (G.questTarget.x - px) / scale + W / 2, my = (G.questTarget.y - py) / scale + W / 2;
+      const cx = clamp(mx, 5, W - 5), cy = clamp(my, 5, W - 5);
+      mctx.strokeStyle = '#4de3ff';
+      mctx.lineWidth = 1.8;
+      mctx.beginPath(); mctx.arc(cx, cy, 5, 0, TAU); mctx.stroke();
+      mctx.fillStyle = '#4de3ff';
+      mctx.beginPath(); mctx.arc(cx, cy, 1.6, 0, TAU); mctx.fill();
+    }
     // 플레이어
     mctx.fillStyle = '#fff';
     mctx.beginPath(); mctx.arc(W / 2, W / 2, 3.4, 0, TAU); mctx.fill();
-    mctx.strokeStyle = '#35f0ff'; mctx.lineWidth = 1.6; mctx.stroke();
+    mctx.strokeStyle = '#4de3ff'; mctx.lineWidth = 1.6; mctx.stroke();
   },
 };

@@ -16,12 +16,14 @@ const PASSIVE_DEFS = {
   wisdom:  { name: '지혜',         emoji: '🧬', desc: '경험치 획득 +10%' },
   regen:   { name: '재생',         emoji: '♻️', desc: '초당 체력 회복 +0.7' },
   luck:    { name: '행운',         emoji: '🍀', desc: '엘리트/상자/하트 확률 증가' },
+  greed:   { name: '탐욕',         emoji: '💰', desc: '젬 획득량 +25%' },
+  thorns:  { name: '가시 갑주',    emoji: '🛡️', desc: '접촉한 적에게 반사 피해 +9' },
 };
 
 function initPassives() {
   G.passives = {
     power: 0, haste: 0, boots: 0, vitality: 0, magnet: 0,
-    crit: 0, wisdom: 0, regen: 0, luck: 0,
+    crit: 0, wisdom: 0, regen: 0, luck: 0, greed: 0, thorns: 0,
   };
 }
 

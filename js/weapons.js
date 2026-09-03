@@ -81,6 +81,28 @@ const WEAPON_DEFS = {
       { count: 2, dmg: 62, cd: 1.2, w: 44 },
     ],
   },
+  blackhole: {
+    name: '블랙홀', emoji: '🕳️', color: '#9b5de5',
+    desc: lv => `적을 빨아들이는 소용돌이 · 공격력 ${WLV.blackhole.lvls[lv - 1].dmg}/틱 · 반경 ${WLV.blackhole.lvls[lv - 1].r}`,
+    lvls: [
+      { r: 100, dmg: 9,  tick: 0.3, cd: 3.4, dur: 2.4, pull: 180 },
+      { r: 118, dmg: 12, tick: 0.3, cd: 3.2, dur: 2.6, pull: 200 },
+      { r: 136, dmg: 16, tick: 0.28, cd: 3.0, dur: 2.8, pull: 230 },
+      { r: 156, dmg: 21, tick: 0.26, cd: 2.8, dur: 3.0, pull: 260 },
+      { r: 176, dmg: 27, tick: 0.24, cd: 2.6, dur: 3.2, pull: 300 },
+    ],
+  },
+  smite: {
+    name: '천벌 망치', emoji: '🔨', color: '#ffe14d',
+    desc: lv => `적 밀집지에 강타 · 공격력 ${WLV.smite.lvls[lv - 1].dmg} (반경 ${WLV.smite.lvls[lv - 1].aoe}) · 넉백`,
+    lvls: [
+      { count: 1, dmg: 55, aoe: 130, cd: 3.6 },
+      { count: 1, dmg: 75, aoe: 145, cd: 3.4 },
+      { count: 1, dmg: 98, aoe: 160, cd: 3.2 },
+      { count: 2, dmg: 98, aoe: 170, cd: 3.0 },
+      { count: 2, dmg: 130, aoe: 190, cd: 2.7 },
+    ],
+  },
 };
 const WLV = WEAPON_DEFS; // desc 내부 참조용
 
@@ -100,6 +122,10 @@ const EVOLUTIONS = {
     mods: { count: 4, dmg: 110, cd: 1.9, aoe: 165, cluster: 4 } },
   lance: { name: '프리즘 레이저', emoji: '🌈', desc: '8방위로 쏟아지는 관통 광선',
     mods: { count: 8, dmg: 92, cd: 1.15, w: 52, omni: true } },
+  blackhole: { name: '심연의 문', emoji: '🌀', desc: '모든 것을 삼키는 격노의 소용돌이',
+    mods: { r: 210, dmg: 40, tick: 0.2, cd: 2.4, dur: 4.0, pull: 420 } },
+  smite: { name: '최후의 심판', emoji: '⚡', desc: '하늘이 무너지는 이중 강타',
+    mods: { count: 3, dmg: 190, aoe: 230, cd: 2.4 } },
 };
 
 /* 무기 실제 스탯 (진화 반영) */
@@ -293,6 +319,36 @@ function fireWeapon(id, lv, dmgM) {
         });
       }
       SFX.play('laser');
+      break;
+    }
+    case 'blackhole': {
+      // 적 밀집지에 소용돌이 생성
+      const cands = G.enemies.filter(e => dist2(e.x, e.y, p.x, p.y) < 560 * 560);
+      let tx, ty;
+      if (cands.length) {
+        const t = cands[(Math.random() * cands.length) | 0];
+        tx = t.x; ty = t.y;
+      } else { const a = Math.random() * TAU; tx = p.x + Math.cos(a) * 220; ty = p.y + Math.sin(a) * 220; }
+      G.vortices.push({ x: tx, y: ty, r: lv.r, dmg: lv.dmg * dmgM, tick: lv.tick, tickT: 0, life: lv.dur, maxLife: lv.dur, pull: lv.pull });
+      SFX.play('portal', tx);
+      break;
+    }
+    case 'smite': {
+      // 밀집 클러스터에 하늘에서 강타 (예고 → 지진)
+      const cands = G.enemies.filter(e => dist2(e.x, e.y, p.x, p.y) < 620 * 620);
+      for (let i = 0; i < lv.count; i++) {
+        let tx, ty;
+        if (cands.length) {
+          const t = cands[(Math.random() * cands.length) | 0];
+          tx = t.x + rand(-24, 24); ty = t.y + rand(-24, 24);
+        } else { const a = Math.random() * TAU; tx = p.x + Math.cos(a) * 240; ty = p.y + Math.sin(a) * 240; }
+        G.projectiles.push({
+          kind: 'smite', x: tx, y: ty, tx, ty, t: 0, dur: 0.6,
+          r: lv.aoe, dmg: lv.dmg * dmgM, life: 0.65,
+          color: WEAPON_DEFS.smite.color,
+        });
+      }
+      SFX.play('charge', p.x);
       break;
     }
   }
@@ -502,6 +558,89 @@ function updateProjectiles(dt) {
       }
       if (b.life <= 0) G.projectiles.splice(i, 1);
     }
+    else if (b.kind === 'meteor') {
+      b.t += dt;
+      b.life -= dt;
+      if (b.t >= b.dur) {
+        G.projectiles.splice(i, 1);
+        SFX.play('boom', b.tx);
+        kickCam(b.tx - p.x, b.ty - p.y, 5);
+        shakeCam(3);
+        POST.triggerShock(b.tx, b.ty, 0.45);
+        G.explosions.push({ x: b.tx, y: b.ty, r: 150, life: 0.38, maxLife: 0.38, color: '#ff8a3d' });
+        for (const e of queryEnemies(b.tx, b.ty, b.r)) damageEnemy(e, b.dmg, true, null);
+        for (let k = 0; k < 2; k++) {
+          const a2 = Math.random() * TAU;
+          G.pickups.push({ kind: 'gem', x: b.tx + rand(-20, 20), y: b.ty + rand(-20, 20), val: 1, t: Math.random() * TAU, vx: Math.cos(a2) * rand(60, 180), vy: Math.sin(a2) * rand(60, 180) });
+        }
+        sparkBurst(b.tx, b.ty, '#ffb060', 12, 420);
+      } else if (b.life <= 0) G.projectiles.splice(i, 1);
+    }
+    else if (b.kind === 'smite') {
+      b.t += dt;
+      b.life -= dt;
+      if (b.t >= b.dur) {
+        // 강타!
+        G.projectiles.splice(i, 1);
+        SFX.play('boom', b.tx);
+        SFX.play('thunder', b.tx);
+        kickCam(b.tx - p.x, b.ty - p.y, 7);
+        shakeCam(4);
+        zoomPunchCam(0.02);
+        POST.triggerShock(b.tx, b.ty, 0.7);
+        POST.triggerFlash(0.1);
+        G.explosions.push({ x: b.tx, y: b.ty, r: b.r * 1.3, life: 0.42, maxLife: 0.42, color: '#ffe14d' });
+        for (const e of queryEnemies(b.tx, b.ty, b.r)) {
+          damageEnemy(e, b.dmg, true, null);
+          // 넉백 + 기절
+          const dd = dist(e.x, e.y, b.tx, b.ty) || 1;
+          e.x += (e.x - b.tx) / dd * 42;
+          e.y += (e.y - b.ty) / dd * 42;
+          e.stun = Math.max(e.stun, 0.5);
+        }
+        for (const c of queryCrystals(b.tx, b.ty, b.r)) damageCrystal(c, b.dmg);
+        for (const v of queryVolatiles(b.tx, b.ty, b.r)) if (!v.fuse) v.fuse = 0.01;
+        sparkBurst(b.tx, b.ty, '#ffe14d', 16, 460);
+        shardBurst(b.tx, b.ty, '#8a7430', 10, 300, 5);
+      } else if (b.life <= 0) {
+        G.projectiles.splice(i, 1);
+      }
+    }
+
+  }
+
+  // 블랙홀 소용돌이
+  for (let vi = G.vortices.length - 1; vi >= 0; vi--) {
+    const vo = G.vortices[vi];
+    vo.life -= dt;
+    if (vo.life <= 0) { G.vortices.splice(vi, 1); continue; }
+    // 강력 흡인
+    for (const e of G.enemies) {
+      const d = dist(e.x, e.y, vo.x, vo.y);
+      if (d < vo.r * 2.2 && d > 4) {
+        e.x += (vo.x - e.x) / d * vo.pull * dt;
+        e.y += (vo.y - e.y) / d * vo.pull * dt;
+      }
+    }
+    // 흡입 파티클 (나선)
+    if (Math.random() < dt * 40) {
+      const a = Math.random() * TAU, rr = vo.r * rand(1.2, 2);
+      G.particles.push({
+        x: vo.x + Math.cos(a) * rr, y: vo.y + Math.sin(a) * rr,
+        vx: -Math.cos(a) * 260, vy: -Math.sin(a) * 260,
+        life: 0.4, maxLife: 0.4, size: rand(1.5, 3.5),
+        color: '#b388ff', grav: 0, shape: 'spark',
+      });
+    }
+    // 틱 데미지
+    vo.tickT -= dt;
+    if (vo.tickT <= 0) {
+      vo.tickT = vo.tick;
+      for (const e of queryEnemies(vo.x, vo.y, vo.r)) {
+        damageEnemy(e, vo.dmg, true, null);
+      }
+      for (const c of queryCrystals(vo.x, vo.y, vo.r)) damageCrystal(c, vo.dmg);
+    }
   }
 
   // 번개 시각효과 수명
@@ -593,6 +732,86 @@ function drawProjectiles(ctx) {
       }
       ctx.restore();
     }
+  }
+
+  // 블랙홀 소용돌이
+  for (const vo of G.vortices || []) {
+    const t = vo.life / vo.maxLife;
+    const spin = G.time * 5;
+    ctx.save();
+    ctx.translate(vo.x, vo.y);
+    // 어두운 코어
+    ctx.globalCompositeOperation = 'lighter';
+    Glow.draw(ctx, '#9b5de5', 0, 0, vo.r * (0.6 + 0.4 * t), 0.5);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(10,6,20,0.85)';
+    ctx.beginPath(); ctx.arc(0, 0, vo.r * 0.3 * t + vo.r * 0.12, 0, TAU); ctx.fill();
+    // 회전 나선 고리 3겹
+    for (let k = 0; k < 3; k++) {
+      ctx.strokeStyle = `rgba(${179 - k * 40},${136 - k * 20},${255 - k * 10},${0.5 * t})`;
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.arc(0, 0, vo.r * (0.45 + k * 0.22), spin * (1 + k * 0.35) + k * 2.1, spin * (1 + k * 0.35) + k * 2.1 + 2.2);
+      ctx.stroke();
+    }
+    // 사건의 지평선
+    ctx.strokeStyle = `rgba(200,160,255,${0.65 * t})`;
+    ctx.lineWidth = 1.6;
+    ctx.setLineDash([14, 10]);
+    ctx.beginPath(); ctx.arc(0, 0, vo.r, -spin * 1.5, -spin * 1.5 + TAU); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  // 천벌 망치 (예고 → 낙하)
+  for (const b of G.projectiles) {
+    if (b.kind !== 'smite') continue;
+    const prog = clamp(b.t / b.dur, 0, 1);
+    if (prog < 1) {
+      // 예고 링
+      ctx.strokeStyle = `rgba(255,225,77,${0.35 + prog * 0.5})`;
+      ctx.lineWidth = 2.4;
+      ctx.beginPath(); ctx.arc(b.tx, b.ty, b.r * (0.4 + prog * 0.6), 0, TAU); ctx.stroke();
+      ctx.fillStyle = `rgba(255,225,77,${0.08 + prog * 0.1})`;
+      ctx.beginPath(); ctx.arc(b.tx, b.ty, b.r * prog, 0, TAU); ctx.fill();
+      // 낙하하는 망치 (마지막 30%)
+      if (prog > 0.7) {
+        const h = (1 - prog) / 0.3;
+        const hy = b.ty - 420 * h;
+        ctx.globalCompositeOperation = 'lighter';
+        Glow.draw(ctx, '#ffe14d', b.tx, hy, 42, 0.8);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.save();
+        ctx.translate(b.tx, hy);
+        ctx.rotate(0.5);
+        ctx.fillStyle = '#d8c47a';
+        MapGen.rr(ctx, -5, -8, 10, 34, 3); ctx.fill();
+        ctx.fillStyle = '#f5efc9';
+        MapGen.rr(ctx, -16, -26, 32, 20, 5); ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+
+  // 유성우
+  for (const b of G.projectiles) {
+    if (b.kind !== 'meteor') continue;
+    const prog = clamp(b.t / b.dur, 0, 1);
+    // 목표 링
+    ctx.strokeStyle = `rgba(255,138,61,${0.3 + prog * 0.55})`;
+    ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.arc(b.tx, b.ty, b.r * (0.5 + prog * 0.5), 0, TAU); ctx.stroke();
+    // 낙하 화염구 (오른쪽 위에서 떨어짐)
+    const mx = b.tx + (1 - prog) * 260, my = b.ty - (1 - prog) * 420;
+    ctx.globalCompositeOperation = 'lighter';
+    Glow.draw(ctx, '#ff8a3d', mx, my, 34, 0.9);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#fff3d6';
+    ctx.beginPath(); ctx.arc(mx, my, 7, 0, TAU); ctx.fill();
+    // 꼬리
+    ctx.strokeStyle = 'rgba(255,150,60,0.75)';
+    ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(mx + 60, my - 96); ctx.stroke();
   }
 
   // 번개 (시네마틱 다중 분기)
