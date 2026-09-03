@@ -22,7 +22,7 @@ const POST = {
 
   init() {
     this.filterOK = typeof ctx.filter === 'string' && ctx.filter !== undefined;
-    this.bpOK = true; // 휘도 임계값 브라이트패스 지원 여부 (최초 1회 검출)
+    this.bpOK = true; // (레거시 호환) 자체 픽셀 브라이트패스로 대체됨
     this.bloomA = document.createElement('canvas');
     this.bloomB = document.createElement('canvas');
     this.streak = document.createElement('canvas');
@@ -49,7 +49,7 @@ const POST = {
     this.streak.width = this.bloomA.width; this.streak.height = this.bloomA.height;
   },
 
-  triggerChroma(a) { this.chroma = Math.min(1, Math.max(this.chroma, a)); },
+  triggerChroma(a) { this.chroma = Math.min(0.6, Math.max(this.chroma, a)); },
   triggerFlash(a) { this.flash = Math.min(0.4, Math.max(this.flash, a)); },
   triggerShock(wx, wy, power) {
     // 월드 좌표 → 화면 좌표
@@ -98,54 +98,121 @@ const POST = {
       outCtx.drawImage(sceneCanvas, 0, 0, W, H);
     }
 
-    /* 물리 기반 렌즈 이펙트: 휘도 임계값 브라이트패스 → 2스케일 블러 블룸 → 아나모픽 스트릭 */
-    if (this.filterOK) {
+    /* ===== Khronos PBR Neutral 톤맵핑 합성 (WebGL) =====
+     * 브라이트패스(픽셀 순회)만 남기고, 블룸 합성은 WebGL에서
+     * 클램핑 없는 HDR 가산 + 톤맵 롤오프로 수행한다.
+     * → 후반부 무기 과다노출 붕괴 근본 해결 */
+    if (this.filterOK && TONEMAP.enabled) {
       const bw = this.bloomA.width, bh = this.bloomA.height;
       const b1 = this.bloomA.getContext('2d');
       b1.setTransform(1, 0, 0, 1, 0, 0);
       b1.clearRect(0, 0, bw, bh);
-      // 오직 밝은 픽셀만 통과 (휘도 임계값 0.7) — 어두운 곳엔 블룸 없음
-      b1.filter = this.bpOK ? 'url(#bp)' : 'brightness(1.5) contrast(2.3)';
-      b1.drawImage(sceneCanvas, 0, 0, bw, bh);
-      b1.filter = 'none';
-      // 최초 1회: 임계값 필터가 실제로 먹히는지 검증 (구형 엔진 폴백)
-      // — 화면 중앙(플레이어 광원이 항상 있는 곳)만 샘플: 구석 비네트는 원래 검정이므로 오탐
-      if (this.bpOK && !this._bpChecked) {
-        this._bpChecked = true;
-        try {
-          const cw = Math.min(30, bw) | 0, chh = Math.min(30, bh) | 0;
-          const ox = ((bw - cw) / 2) | 0, oy = ((bh - chh) / 2) | 0;
-          const d = b1.getImageData(ox, oy, cw, chh).data;
-          let sum = 0;
-          for (let i = 3; i < d.length; i += 4) sum += d[i];
-          if (sum <= 0) this.bpOK = false;
-        } catch (e) { this.bpOK = false; }
+      // 게임이 멈춘 상태(레벨업/상자/일시정지)에선 브라이트패스 갱신 스킵
+      if (G.state === 'playing') {
+        const now2 = performance.now();
+        if (now2 - (this._bpCacheT || 0) > 200) {
+          this._bpCacheT = now2;
+          const tcv = this._bpTmp || (this._bpTmp = document.createElement('canvas'));
+          tcv.width = bw; tcv.height = bh;
+          const tc = tcv.getContext('2d', { willReadFrequently: true });
+          tc.clearRect(0, 0, bw, bh);
+          tc.drawImage(sceneCanvas, 0, 0, bw, bh);
+          let img;
+          try { img = tc.getImageData(0, 0, bw, bh); } catch (e) { img = null; }
+          if (img) {
+            const d = img.data;
+            const THR = 184;
+            for (let i = 0; i < d.length; i += 4) {
+              const l = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+              if (l < THR) { d[i] = d[i + 1] = d[i + 2] = 0; d[i + 3] = 0; }
+              else {
+                const k = (l - THR) / (255 - THR);
+                d[i] *= k; d[i + 1] *= k; d[i + 2] *= k; d[i + 3] = 255;
+              }
+            }
+            tc.putImageData(img, 0, 0);
+          }
+          // 브라이트패스 → 블룸 버퍼 (블러)
+          const b2 = this.bloomB.getContext('2d');
+          b2.setTransform(1, 0, 0, 1, 0, 0);
+          b2.clearRect(0, 0, bw, bh);
+          b2.filter = 'blur(6px) saturate(0.5)';
+          b2.drawImage(tcv, 0, 0);
+          b2.filter = 'none';
+        }
       }
-      // 와이드 블룸 (부드러운 광량 확산)
+      // WebGL HDR 합성 + Khronos PBR Neutral 톤맵 → 화면
+      const rushGain = (G.rage && G.rage.active) ? 1.15 : 0.85;
+      TONEMAP.composite(outCtx, sceneCanvas, this.bloomB, rushGain, 1.02);
+
+      // 톤맵된 화면 위의 나머지 효과는 2D로 계속 (색수차/러시/그레이드)
+    } else if (this.filterOK) {
+      const bw = this.bloomA.width, bh = this.bloomA.height;
+      const b1 = this.bloomA.getContext('2d');
+      b1.setTransform(1, 0, 0, 1, 0, 0);
+      b1.clearRect(0, 0, bw, bh);
+      // ===== 자체 픽셀 브라이트패스 =====
+      // SVG filter(url)는 GPU/드라이버별로 결과가 달라져 전체 과다노출 버그의 원인이 됨.
+      // ImageData 직접 순회로 휘도 0.72 이하 픽셀을 0으로 만든다 — 완전히 결정적.
+      // 성능: 1/4 해상도만 처리, 매 프레임 전체 순회는 부담이므로 0.5초 캐시 후 보간.
+      // 게임이 멈춘 상태(레벨업/상자/일시정지)에선 블룸 갱신/합성 스킵 — 오래된 밝은 프레임 방출 방지
+      if (G.state !== 'playing') return;
+      const now2 = performance.now();
+      if (!this._bpCache || now2 - this._bpCacheT > 450) {
+        this._bpCacheT = now2;
+        // 원본을 임시 캔버스에 담고
+        const tcv = this._bpTmp || (this._bpTmp = document.createElement('canvas'));
+        tcv.width = bw; tcv.height = bh;
+        const tc = tcv.getContext('2d', { willReadFrequently: true });
+        tc.clearRect(0, 0, bw, bh);
+        tc.drawImage(sceneCanvas, 0, 0, bw, bh);
+        let img;
+        try { img = tc.getImageData(0, 0, bw, bh); } catch (e) { img = null; }
+        if (img) {
+          const d = img.data;
+          const THR = 184; // 0.72 * 255
+          for (let i = 0; i < d.length; i += 4) {
+            const l = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+            if (l < THR) { d[i] = d[i + 1] = d[i + 2] = 0; d[i + 3] = 0; }
+            else {
+              // 임계값 위 픽셀도 스무스 커브로 과잉 방출 방지 (l 184~255 → 0~1 스케일)
+              const k = (l - THR) / (255 - THR);
+              d[i] *= k; d[i + 1] *= k; d[i + 2] *= k; d[i + 3] = 255;
+            }
+          }
+          tc.putImageData(img, 0, 0);
+          this._bpCache = true;
+        }
+        // 캐시 결과를 bloomA로 복사
+        b1.drawImage(tcv, 0, 0);
+      } else {
+        // 캐시 주기 사이: 전프레임 bloomA 유지 (컨텍스트 유지됨)
+      }
+      // 와이드 블룸 (부드러운 광량 확산) — 채도 절제로 형광 포화 방지
       const b2 = this.bloomB.getContext('2d');
       b2.setTransform(1, 0, 0, 1, 0, 0);
       b2.clearRect(0, 0, bw, bh);
-      b2.filter = 'blur(7px)';
+      b2.filter = 'blur(7px) saturate(0.55)';
       b2.drawImage(this.bloomA, 0, 0);
       b2.filter = 'none';
       outCtx.globalCompositeOperation = 'lighter';
-      outCtx.globalAlpha = 0.5;
+      outCtx.globalAlpha = 0.24;
       outCtx.drawImage(this.bloomB, 0, 0, W, H);
       // 타이트 블룸 (광원 중심의 또렷한 글로어)
       b2.clearRect(0, 0, bw, bh);
-      b2.filter = 'blur(2.5px)';
+      b2.filter = 'blur(2.5px) saturate(0.7)';
       b2.drawImage(this.bloomA, 0, 0);
       b2.filter = 'none';
-      outCtx.globalAlpha = 0.55;
+      outCtx.globalAlpha = 0.27;
       outCtx.drawImage(this.bloomB, 0, 0, W, H);
       // 아나모픽 렌즈 스트릭: 브라이트패스를 수평으로 6배 늘린 빛줄기
       const sc = this.streak.getContext('2d');
       sc.setTransform(1, 0, 0, 1, 0, 0);
       sc.clearRect(0, 0, bw, bh);
-      sc.filter = 'blur(1.6px)';
+      sc.filter = 'blur(1.6px) saturate(0.5)';
       sc.drawImage(this.bloomA, -bw * 2.5, 0, bw * 6, bh);
       sc.filter = 'none';
-      outCtx.globalAlpha = 0.4;
+      outCtx.globalAlpha = 0.22;
       outCtx.drawImage(this.streak, 0, 0, W, H);
       outCtx.globalAlpha = 1;
       outCtx.globalCompositeOperation = 'source-over';
@@ -160,12 +227,12 @@ const POST = {
         for (const l of cands) {
           const sx = (l.x - camL) * zoom, sy = (l.y - camT) * zoom;
           if (sx < -60 || sy < -60 || sx > W + 60 || sy > H + 60) continue;
-          const I = clamp(l.a * clamp(l.r / 260, 0.45, 1.3), 0.3, 1.1);
+          const I = clamp(l.a * clamp(l.r / 260, 0.45, 1.3), 0.3, 0.85);
           // 스타버스트 가로 스트릭 (아나모픽)
           const sl = 70 + I * 170;
           const g1 = outCtx.createLinearGradient(sx - sl, sy, sx + sl, sy);
           g1.addColorStop(0, 'rgba(255,255,255,0)');
-          g1.addColorStop(0.5, `rgba(255,255,255,${(0.42 * I).toFixed(3)})`);
+          g1.addColorStop(0.5, `rgba(255,255,255,${(0.3 * I).toFixed(3)})`);
           g1.addColorStop(1, 'rgba(255,255,255,0)');
           outCtx.fillStyle = g1;
           outCtx.fillRect(sx - sl, sy - 1.4 * I, sl * 2, 2.8 * I);
@@ -178,7 +245,7 @@ const POST = {
           outCtx.fillStyle = g2;
           outCtx.fillRect(sx - I, sy - sv, 2 * I, sv * 2);
           // 코어 글로어
-          Glow.draw(outCtx, l.color, sx, sy, 24 + I * 34, 0.5 * I);
+          Glow.draw(outCtx, l.color, sx, sy, 20 + I * 26, 0.38 * I);
           // 고스트 체인: 광원→화면중심 축을 관통해 반대편까지 이어지는 렌즈 내부 반사
           const dx = cx - sx, dy = cy - sy;
           const ghosts = [[0.35, 13], [0.75, 8], [1.15, 19], [1.6, 11]];
@@ -215,15 +282,8 @@ const POST = {
       outCtx.globalCompositeOperation = 'source-over';
     }
 
-    /* 도파민 러시: 방사형 블러 + 스피드라인 */
+    /* 도파민 러시: 스피드라인 (방사형 블러는 Khronos 톤맵 시대에 제거 — 과노출 원인) */
     if (G.rage && G.rage.active) {
-      outCtx.globalCompositeOperation = 'lighter';
-      for (let k = 1; k <= 3; k++) {
-        const s = 1 + k * 0.014;
-        outCtx.globalAlpha = 0.1 / k;
-        outCtx.drawImage(sceneCanvas, W / 2 * (1 - s), H / 2 * (1 - s), W * s, H * s);
-      }
-      outCtx.globalAlpha = 1;
       // 스피드라인
       const cx = W / 2, cy = H / 2;
       outCtx.strokeStyle = 'rgba(255,120,190,0.16)';
@@ -262,12 +322,12 @@ const POST = {
 
     /* 밤 틴트 (라이팅이 밤을 담당 — 미미하게만) */
     if (G.dayTint > 0.05) {
-      outCtx.fillStyle = `rgba(14,22,58,${G.dayTint * 0.22})`;
+      outCtx.fillStyle = `rgba(14,22,58,${G.dayTint * 0.12})`;
       outCtx.fillRect(0, 0, W, H);
     }
     /* 러시 발열 틴트 */
     if (G.rage && G.rage.active) {
-      outCtx.fillStyle = `rgba(120,20,60,${0.07 + Math.sin(G.time * 10) * 0.03})`;
+      outCtx.fillStyle = `rgba(120,20,60,${0.05 + Math.sin(G.time * 10) * 0.02})`;
       outCtx.fillRect(0, 0, W, H);
     }
     /* 비네트 */
@@ -349,19 +409,19 @@ const LIGHTS = {
     // 플레이어 코어: 최대 광원
     L.push({
       x: p.x, y: p.y,
-      r: rushOn ? 330 : 215,
-      color: rushOn ? `hsl(${(T * 220) % 360},100%,70%)` : '#a8dcff',
+      r: rushOn ? 300 : 265,
+      color: rushOn ? `hsl(${(T * 220) % 360},100%,75%)` : '#c8ecff',
       a: flicker(0, 1.0),
-      bloom: 0.11,
+      bloom: 0.13,
     });
     // 폭발/충격파: 강한 플래시
     for (const ex of G.explosions) {
       const t = ex.life / ex.maxLife;
-      L.push({ x: ex.x, y: ex.y, r: ex.r * 2.4, color: ex.color || '#ff9a3d', a: t, bloom: t * 0.22 });
+      L.push({ x: ex.x, y: ex.y, r: ex.r * 2.8, color: ex.color || '#ff9a3d', a: Math.min(1, t * 1.3), bloom: t * 0.26 });
     }
     // 도파민 결정: 색조 쉬머
     for (const c of G.crystals) {
-      L.push({ x: c.x, y: c.y, r: 140, color: `hsl(${c.hue + Math.sin(c.wobble) * 14},100%,66%)`, a: flicker(c.x, 0.85), bloom: 0.09 });
+      L.push({ x: c.x, y: c.y, r: 140, color: `hsl(${c.hue + Math.sin(c.wobble) * 14},100%,66%)`, a: flicker(c.x, 0.95), bloom: 0.11 });
     }
     // 용암: 화염광
     for (const lv of this.lavaCache) {
@@ -419,9 +479,9 @@ const LIGHTS = {
     // 주변광(앰비언트): 밤이 어두워지고, 러시 시 따뜻해짐
     const day = G.dayTint || 0;
     const amb = [
-      Math.round(lerp(lerp(140, 108, day), 152, rushOn ? 0.4 : 0)),
-      Math.round(lerp(lerp(146, 118, day), 118, rushOn ? 0.4 : 0)),
-      Math.round(lerp(lerp(158, 140, day), 134, rushOn ? 0.4 : 0)),
+      Math.round(lerp(lerp(185, 148, day), 196, rushOn ? 0.4 : 0)),
+      Math.round(lerp(lerp(190, 158, day), 165, rushOn ? 0.4 : 0)),
+      Math.round(lerp(lerp(205, 180, day), 185, rushOn ? 0.4 : 0)),
     ];
     lc.setTransform(1, 0, 0, 1, 0, 0);
     lc.globalCompositeOperation = 'source-over';
@@ -509,7 +569,7 @@ const LIGHTS = {
       if (dd > 430) continue;
       const away = Math.atan2(e.y - p.y, e.x - p.x);
       const shadowLen = clamp(1 - dd / 430, 0, 1) * e.r * 2.4;
-      ctx.globalAlpha = clamp(1 - dd / 430, 0, 1) * 0.4;
+      ctx.globalAlpha = clamp(1 - dd / 430, 0, 1) * 0.3;
       ctx.fillStyle = '#050608';
       ctx.save();
       ctx.translate(e.x + Math.cos(away) * shadowLen * 0.5, e.y + e.r * 0.7 + Math.sin(away) * shadowLen * 0.35);
@@ -563,9 +623,10 @@ function resize() {
   G.vigGrad = outCtx.createRadialGradient(G.view.w / 2, G.view.h / 2, Math.min(G.view.w, G.view.h) * 0.36,
                                           G.view.w / 2, G.view.h / 2, Math.max(G.view.w, G.view.h) * 0.72);
   G.vigGrad.addColorStop(0, 'rgba(0,0,0,0)');
-  G.vigGrad.addColorStop(1, 'rgba(0,0,0,0.34)');
+  G.vigGrad.addColorStop(1, 'rgba(0,0,0,0.26)');
   if (LIGHTS.canvas) LIGHTS.resize();
   POST.resize();
+  TONEMAP.resize();
 }
 window.addEventListener('resize', resize);
 
@@ -677,8 +738,8 @@ function activateRush() {
   zoomPunchCam(0.05);
   shakeCam(6);
   QUESTS.onRush();
-  POST.triggerChroma(0.65);
-  POST.triggerFlash(0.18);
+  POST.triggerChroma(0.45);
+  POST.triggerFlash(0.13);
   POST.triggerShock(p.x, p.y, 1.0);
   showBanner('🔥 도파민 러시!! 🔥', '#ff4d9d');
   document.body.classList.add('rush');
@@ -2005,6 +2066,7 @@ window.addEventListener('load', () => {
   resize();
   LIGHTS.init();
   POST.init();
+  TONEMAP.init();
   bindUI();
   G.state = 'title';
   requestAnimationFrame(loop);
