@@ -22,8 +22,10 @@ const POST = {
 
   init() {
     this.filterOK = typeof ctx.filter === 'string' && ctx.filter !== undefined;
+    this.bpOK = true; // 휘도 임계값 브라이트패스 지원 여부 (최초 1회 검출)
     this.bloomA = document.createElement('canvas');
     this.bloomB = document.createElement('canvas');
+    this.streak = document.createElement('canvas');
     // 필름 그레인 타일
     this.grain = document.createElement('canvas');
     this.grain.width = 160; this.grain.height = 160;
@@ -44,6 +46,7 @@ const POST = {
     this.bloomA.width = Math.max(2, (G.view.w * q) | 0);
     this.bloomA.height = Math.max(2, (G.view.h * q) | 0);
     this.bloomB.width = this.bloomA.width; this.bloomB.height = this.bloomA.height;
+    this.streak.width = this.bloomA.width; this.streak.height = this.bloomA.height;
   },
 
   triggerChroma(a) { this.chroma = Math.min(1, Math.max(this.chroma, a)); },
@@ -95,26 +98,102 @@ const POST = {
       outCtx.drawImage(sceneCanvas, 0, 0, W, H);
     }
 
-    /* 브라이트패스 블룸: 다운샘플 → 밝기 필터 → 블러 → 가산 */
+    /* 물리 기반 렌즈 이펙트: 휘도 임계값 브라이트패스 → 2스케일 블러 블룸 → 아나모픽 스트릭 */
     if (this.filterOK) {
       const bw = this.bloomA.width, bh = this.bloomA.height;
       const b1 = this.bloomA.getContext('2d');
       b1.setTransform(1, 0, 0, 1, 0, 0);
       b1.clearRect(0, 0, bw, bh);
-      b1.filter = 'brightness(1.32) saturate(1.25) contrast(1.06)';
+      // 오직 밝은 픽셀만 통과 (휘도 임계값 0.7) — 어두운 곳엔 블룸 없음
+      b1.filter = this.bpOK ? 'url(#bp)' : 'brightness(1.5) contrast(2.3)';
       b1.drawImage(sceneCanvas, 0, 0, bw, bh);
       b1.filter = 'none';
+      // 최초 1회: 임계값 필터가 실제로 먹히는지 검증 (구형 엔진 폴백)
+      // — 화면 중앙(플레이어 광원이 항상 있는 곳)만 샘플: 구석 비네트는 원래 검정이므로 오탐
+      if (this.bpOK && !this._bpChecked) {
+        this._bpChecked = true;
+        try {
+          const cw = Math.min(30, bw) | 0, chh = Math.min(30, bh) | 0;
+          const ox = ((bw - cw) / 2) | 0, oy = ((bh - chh) / 2) | 0;
+          const d = b1.getImageData(ox, oy, cw, chh).data;
+          let sum = 0;
+          for (let i = 3; i < d.length; i += 4) sum += d[i];
+          if (sum <= 0) this.bpOK = false;
+        } catch (e) { this.bpOK = false; }
+      }
+      // 와이드 블룸 (부드러운 광량 확산)
       const b2 = this.bloomB.getContext('2d');
       b2.setTransform(1, 0, 0, 1, 0, 0);
       b2.clearRect(0, 0, bw, bh);
-      b2.filter = 'blur(5px)';
+      b2.filter = 'blur(7px)';
       b2.drawImage(this.bloomA, 0, 0);
       b2.filter = 'none';
       outCtx.globalCompositeOperation = 'lighter';
-      outCtx.globalAlpha = 0.42;
+      outCtx.globalAlpha = 0.5;
       outCtx.drawImage(this.bloomB, 0, 0, W, H);
+      // 타이트 블룸 (광원 중심의 또렷한 글로어)
+      b2.clearRect(0, 0, bw, bh);
+      b2.filter = 'blur(2.5px)';
+      b2.drawImage(this.bloomA, 0, 0);
+      b2.filter = 'none';
+      outCtx.globalAlpha = 0.55;
+      outCtx.drawImage(this.bloomB, 0, 0, W, H);
+      // 아나모픽 렌즈 스트릭: 브라이트패스를 수평으로 6배 늘린 빛줄기
+      const sc = this.streak.getContext('2d');
+      sc.setTransform(1, 0, 0, 1, 0, 0);
+      sc.clearRect(0, 0, bw, bh);
+      sc.filter = 'blur(1.6px)';
+      sc.drawImage(this.bloomA, -bw * 2.5, 0, bw * 6, bh);
+      sc.filter = 'none';
+      outCtx.globalAlpha = 0.4;
+      outCtx.drawImage(this.streak, 0, 0, W, H);
       outCtx.globalAlpha = 1;
       outCtx.globalCompositeOperation = 'source-over';
+    }
+
+    /* 렌즈 플레어: 밝은 광원의 고스트 체인 + 십자 스타버스트 (실제 렌즈 광학 구조) */
+    if (typeof LIGHTS !== 'undefined' && LIGHTS.bloom && LIGHTS.bloom.length) {
+      const cands = LIGHTS.bloom.filter(l => l.a > 0.55).slice(0, 3);
+      if (cands.length) {
+        outCtx.globalCompositeOperation = 'lighter';
+        const cx = W / 2, cy = H / 2;
+        for (const l of cands) {
+          const sx = (l.x - camL) * zoom, sy = (l.y - camT) * zoom;
+          if (sx < -60 || sy < -60 || sx > W + 60 || sy > H + 60) continue;
+          const I = clamp(l.a * clamp(l.r / 260, 0.45, 1.3), 0.3, 1.1);
+          // 스타버스트 가로 스트릭 (아나모픽)
+          const sl = 70 + I * 170;
+          const g1 = outCtx.createLinearGradient(sx - sl, sy, sx + sl, sy);
+          g1.addColorStop(0, 'rgba(255,255,255,0)');
+          g1.addColorStop(0.5, `rgba(255,255,255,${(0.42 * I).toFixed(3)})`);
+          g1.addColorStop(1, 'rgba(255,255,255,0)');
+          outCtx.fillStyle = g1;
+          outCtx.fillRect(sx - sl, sy - 1.4 * I, sl * 2, 2.8 * I);
+          // 세로 스트릭 (짧게)
+          const sv = 34 + I * 66;
+          const g2 = outCtx.createLinearGradient(sx, sy - sv, sx, sy + sv);
+          g2.addColorStop(0, 'rgba(255,255,255,0)');
+          g2.addColorStop(0.5, `rgba(255,255,255,${(0.26 * I).toFixed(3)})`);
+          g2.addColorStop(1, 'rgba(255,255,255,0)');
+          outCtx.fillStyle = g2;
+          outCtx.fillRect(sx - I, sy - sv, 2 * I, sv * 2);
+          // 코어 글로어
+          Glow.draw(outCtx, l.color, sx, sy, 24 + I * 34, 0.5 * I);
+          // 고스트 체인: 광원→화면중심 축을 관통해 반대편까지 이어지는 렌즈 내부 반사
+          const dx = cx - sx, dy = cy - sy;
+          const ghosts = [[0.35, 13], [0.75, 8], [1.15, 19], [1.6, 11]];
+          for (const [k, r0] of ghosts) {
+            const gx = sx + dx * k, gy = sy + dy * k;
+            const gr = r0 * (0.6 + I * 0.8);
+            if (gx < -40 || gy < -40 || gx > W + 40 || gy > H + 40) continue;
+            outCtx.strokeStyle = `rgba(205,230,255,${(0.09 * I).toFixed(3)})`;
+            outCtx.lineWidth = 1.5;
+            outCtx.beginPath(); outCtx.arc(gx, gy, gr, 0, TAU); outCtx.stroke();
+            Glow.draw(outCtx, l.color, gx, gy, gr * 1.6, 0.07 * I);
+          }
+        }
+        outCtx.globalCompositeOperation = 'source-over';
+      }
     }
 
     /* 색수차: SVG 채널 분리 필터로 R/B를 반대로 미끄러뜨림 (러시·임팩트) */
@@ -171,7 +250,7 @@ const POST = {
 
     /* 필름 그레인 */
     outCtx.globalCompositeOperation = 'overlay';
-    outCtx.globalAlpha = 0.05;
+    outCtx.globalAlpha = 0.038;
     const gx = -Math.random() * 160, gy = -Math.random() * 160;
     for (let ty2 = gy; ty2 < H; ty2 += 160) {
       for (let tx2 = gx; tx2 < W; tx2 += 160) {
@@ -273,16 +352,16 @@ const LIGHTS = {
       r: rushOn ? 330 : 215,
       color: rushOn ? `hsl(${(T * 220) % 360},100%,70%)` : '#a8dcff',
       a: flicker(0, 1.0),
-      bloom: 0.16,
+      bloom: 0.11,
     });
     // 폭발/충격파: 강한 플래시
     for (const ex of G.explosions) {
       const t = ex.life / ex.maxLife;
-      L.push({ x: ex.x, y: ex.y, r: ex.r * 2.4, color: ex.color || '#ff9a3d', a: t, bloom: t * 0.3 });
+      L.push({ x: ex.x, y: ex.y, r: ex.r * 2.4, color: ex.color || '#ff9a3d', a: t, bloom: t * 0.22 });
     }
     // 도파민 결정: 색조 쉬머
     for (const c of G.crystals) {
-      L.push({ x: c.x, y: c.y, r: 140, color: `hsl(${c.hue + Math.sin(c.wobble) * 14},100%,66%)`, a: flicker(c.x, 0.85), bloom: 0.12 });
+      L.push({ x: c.x, y: c.y, r: 140, color: `hsl(${c.hue + Math.sin(c.wobble) * 14},100%,66%)`, a: flicker(c.x, 0.85), bloom: 0.09 });
     }
     // 용암: 화염광
     for (const lv of this.lavaCache) {
@@ -297,7 +376,7 @@ const LIGHTS = {
       L.push({ x: v.x, y: v.y, r: v.fuse > 0 ? 190 : 90, color: v.fuse > 0 ? '#ff3b2d' : '#ff7a2d', a: flicker(v.x, 0.6), bloom: 0 });
     }
     for (const gh of G.geysers || []) {
-      if (gh.state === 'erupt') L.push({ x: gh.x, y: gh.y, r: 260, color: '#ff8a3d', a: 1, bloom: 0.12 });
+      if (gh.state === 'erupt') L.push({ x: gh.x, y: gh.y, r: 260, color: '#ff8a3d', a: 1, bloom: 0.1 });
       else if (gh.state === 'warn') L.push({ x: gh.x, y: gh.y, r: 90 * (1 - gh.t / 0.7), color: '#ff8a3d', a: 0.5, bloom: 0 });
     }
     for (const bn of G.bouncers || []) {
@@ -324,7 +403,7 @@ const LIGHTS = {
     }
     // 상자
     for (const pk of G.pickups) {
-      if (pk.kind === 'chest') L.push({ x: pk.x, y: pk.y, r: 110, color: '#e8b74a', a: flicker(pk.x, 0.6), bloom: 0.1 });
+      if (pk.kind === 'chest') L.push({ x: pk.x, y: pk.y, r: 110, color: '#e8b74a', a: flicker(pk.x, 0.6), bloom: 0.08 });
     }
     // 상한: 화면 중심에서 가까운 순
     if (L.length > 46) {

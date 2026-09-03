@@ -6,16 +6,27 @@
 <title>도파민 서바이버 - 프로시듀럴 맵 서바이벌</title>
 <meta name="description" content="무한 프로시듀럴 맵에서 벌어지는 도파민 폭발 서바이벌! 레벨업, 무기 수집, 보물 상자, 보스전!">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>💎</text></svg>">
-<link rel="stylesheet" href="style.css?v=107">
+<link rel="stylesheet" href="style.css?v=108">
 </head>
 <body>
 
 <canvas id="game"></canvas>
 
-<!-- 색수차 채널 분리 필터 (포스트FX) -->
+<!-- 렌즈 광학 필터 (포스트FX): 채널 분리 + 휘도 임계값 브라이트패스 -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <filter id="chR" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0"/></filter>
   <filter id="chB" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0"/></filter>
+  <filter id="bp" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" result="lum"
+      values="1 0 0 0 0
+              0 1 0 0 0
+              0 0 1 0 0
+              0.2126 0.7152 0.0722 0 0"/>
+    <feComponentTransfer in="lum" result="th">
+      <feFuncA type="table" tableValues="0 0 0 0 0 0 0 0.08 0.32 0.66 1"/>
+    </feComponentTransfer>
+    <feComposite in="th" in2="th" operator="in"/>
+  </filter>
 </svg>
 
 <!-- ============ HUD ============ -->
@@ -131,12 +142,12 @@
   </div>
 </div>
 
-<script src="js/core.js?v=107"></script>
-<script src="js/audio.js?v=107"></script>
-<script src="js/map.js?v=107"></script>
-<script src="js/entities.js?v=107"></script>
-<script src="js/weapons.js?v=107"></script>
-<script src="js/upgrades.js?v=107"></script>
-<script src="js/game.js?v=107"></script>
+<script src="js/core.js?v=108"></script>
+<script src="js/audio.js?v=108"></script>
+<script src="js/map.js?v=108"></script>
+<script src="js/entities.js?v=108"></script>
+<script src="js/weapons.js?v=108"></script>
+<script src="js/upgrades.js?v=108"></script>
+<script src="js/game.js?v=108"></script>
 </body>
 </html>
