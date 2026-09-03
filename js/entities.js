@@ -153,8 +153,7 @@ function updateSpawns(dt) {
   }
 
   // 도파민 결정 클러스터 스폰 (맵 상호작용)
-  G.crystalT = (G.crystalT === undefined ? 12 : G.crystalT) - dt;
-  if (G.crystalT <= 0) {
+  G.crystalT = (G.crystalT === undefined ? 12 : G.crystalT) - dt;  if (G.crystalT <= 0) {
     G.crystalT = rand(14, 22);
     if (G.crystals.length < 4) {
       for (let tries = 0; tries < 8; tries++) {
@@ -176,6 +175,9 @@ function updateSpawns(dt) {
     }
   }
 
+  // 지형 위험물/기믹 유지 (탄력 버섯·폭발성 결정·간헐천)
+  spawnMaintainHazards(dt);
+
   // 보스 스폰 (5/10/15/20분)
   for (const bd of BOSSES) {
     if (G.minute >= bd.min && !G.bossSpawned.has(bd.min)) {
@@ -185,6 +187,8 @@ function updateSpawns(dt) {
       SFX.play('boss');
       shakeCam(9);
       zoomPunchCam(0.045);
+      POST.letterbox = 1.6; // 시네마 레터박스
+      POST.triggerShock(G.boss.x, G.boss.y, 0.6);
     }
   }
 }
@@ -426,7 +430,16 @@ function killEnemy(e) {
   // 충격파 링
   if (e.elite || e.boss) {
     G.explosions.push({ x: e.x, y: e.y, r: e.r * (e.boss ? 5 : 3), life: 0.35, maxLife: 0.35, color: e.color, thin: true });
-    if (e.boss) { zoomPunchCam(0.05); } else { zoomPunchCam(0.018); }
+    if (e.boss) {
+      zoomPunchCam(0.05);
+      POST.triggerFlash(0.24);
+      POST.triggerChroma(0.55);
+      POST.triggerShock(e.x, e.y, 1.0);
+    } else {
+      zoomPunchCam(0.018);
+      POST.triggerFlash(0.09);
+      POST.triggerShock(e.x, e.y, 0.35);
+    }
   }
 
   // 젬 드롭
@@ -795,6 +808,254 @@ function drawCrown(ctx, x, y, s) {
   ctx.strokeStyle = '#b3923a'; ctx.lineWidth = 1.2; ctx.stroke();
   ctx.fillStyle = '#ff3b3b';
   ctx.beginPath(); ctx.arc(x, y - s * 0.45, s * 0.14, 0, TAU); ctx.fill();
+}
+
+/* ============================================================
+ * 지형 위험물/기믹: 탄력 버섯 · 폭발성 결정 · 간헐천
+ * ============================================================ */
+
+function queryVolatiles(x, y, r) {
+  const out = [];
+  for (const v of G.volatiles) {
+    if (dist2(v.x, v.y, x, y) <= (r + v.r) * (r + v.r)) out.push(v);
+  }
+  return out;
+}
+
+function spawnMaintainHazards(dt) {
+  const p = G.player;
+  const m = G.minute;
+  G.hazardT -= dt;
+  if (G.hazardT > 0) return;
+  G.hazardT = 7;
+
+  const spot = (minDist, maxDist, biomes) => {
+    for (let t = 0; t < 10; t++) {
+      const a = Math.random() * TAU, d = rand(minDist, maxDist);
+      const x = p.x + Math.cos(a) * d, y = p.y + Math.sin(a) * d;
+      const b = MapGen.biome(Math.floor(x / TILE), Math.floor(y / TILE));
+      if (biomes.includes(b) && !MapGen.featureFor(b, Math.floor(x / TILE), Math.floor(y / TILE))) return { x, y };
+    }
+    return null;
+  };
+
+  // 탄력 버섯: 밟으면 플레이어가 발사된다!
+  if (G.bouncers.filter(b => dist2(b.x, b.y, p.x, p.y) < 1100 * 1100).length < 2) {
+    const s = spot(350, 800, [B_GRASS, B_FOREST, B_SNOW]);
+    if (s) G.bouncers.push({ x: s.x, y: s.y, r: 30, squash: 0, t: Math.random() * TAU });
+  }
+  // 폭발성 결정: 건드리면 연쇄 폭발 (무기로 터뜨릴 수 있음)
+  if (G.volatiles.filter(b => dist2(b.x, b.y, p.x, p.y) < 1100 * 1100).length < 2) {
+    const s = spot(350, 850, [B_VOLCANIC, B_CRYSTAL, B_ROCK, B_DESERT]);
+    if (s) G.volatiles.push({ x: s.x, y: s.y, r: 26, hp: 1, fuse: 0, armed: true, t: Math.random() * TAU });
+  }
+  // 간헐천 (2분 이후): 주기적으로 분출하는 화염 기둥
+  if (m > 2 && G.geysers.filter(b => dist2(b.x, b.y, p.x, p.y) < 1400 * 1400).length < 2) {
+    const s = spot(400, 950, [B_VOLCANIC]);
+    if (s) G.geysers.push({ x: s.x, y: s.y, r: 52, state: 'idle', t: rand(1.5, 3) });
+  }
+  // 멀어진 하자드 정리
+  for (const arr of [G.bouncers, G.volatiles, G.geysers]) {
+    for (let i = arr.length - 1; i >= 0; i--) {
+      if (dist2(arr[i].x, arr[i].y, p.x, p.y) > 2600 * 2600) arr.splice(i, 1);
+    }
+  }
+}
+
+function detonateVolatile(v) {
+  if (v.dead) return;
+  v.dead = true;
+  const idx = G.volatiles.indexOf(v);
+  if (idx >= 0) G.volatiles.splice(idx, 1);
+
+  SFX.play('boom', v.x);
+  kickCam(v.x - G.player.x, v.y - G.player.y, 6);
+  zoomPunchCam(0.02);
+  POST.triggerChroma(0.3);
+  POST.triggerFlash(0.07);
+  POST.triggerShock(v.x, v.y, 0.55);
+
+  // 광역 폭발: 적에게도 피해 (무기화!)
+  G.explosions.push({ x: v.x, y: v.y, r: 240, life: 0.4, maxLife: 0.4, color: '#ff7a2d' });
+  for (const e of queryEnemies(v.x, v.y, 150)) damageEnemy(e, 90, true, null);
+  for (const c of queryCrystals(v.x, v.y, 150)) damageCrystal(c, 60);
+  const pd = dist2(v.x, v.y, G.player.x, G.player.y);
+  if (pd < 150 * 150 && G.player.iFrames <= 0) {
+    hurtPlayer(22, v.x, v.y);
+    G.player.iFrames = 0.6;
+  }
+  // 연쇄!
+  for (const o of G.volatiles) {
+    if (!o.dead && !o.fuse && dist2(o.x, o.y, v.x, v.y) < 290 * 290) o.fuse = 0.14;
+  }
+  shardBurst(v.x, v.y, '#ff7a2d', 22, 420, 6);
+  shardBurst(v.x, v.y, '#8a2f1c', 12, 300, 5);
+  G.particles.push({ x: v.x, y: v.y, vx: 0, vy: 0, life: 0.2, maxLife: 0.2, size: 70, color: '#ffb060', grav: 0, shape: 'glow' });
+  // 소량 젬
+  for (let i = 0; i < randi(3, 5); i++) {
+    const a = Math.random() * TAU;
+    G.pickups.push({ kind: 'gem', x: v.x, y: v.y, val: 1, t: Math.random() * TAU, vx: Math.cos(a) * rand(80, 200), vy: Math.sin(a) * rand(80, 200) });
+  }
+}
+
+function launchBouncer(b) {
+  const p = G.player;
+  b.squash = 1;
+  const a = Math.atan2(p.faceY, p.faceX) || 0;
+  p.vel.x = Math.cos(a) * 980;
+  p.vel.y = Math.sin(a) * 980;
+  SFX.play('rush');
+  SFX.play('dash');
+  zoomPunchCam(0.03);
+  POST.triggerChroma(0.35);
+  shakeCam(3);
+  showBanner('🚀 발사!', '#4de3ff');
+  for (let i = 0; i < 26; i++) {
+    const a2 = (i / 26) * TAU;
+    G.particles.push({ x: b.x, y: b.y, vx: Math.cos(a2) * rand(120, 380), vy: Math.sin(a2) * rand(120, 380), life: rand(0.3, 0.6), maxLife: 0.6, size: rand(2, 5), color: choice(['#4de3ff', '#a8f0ff', '#ffffff']), grav: 0, shape: 'spark' });
+  }
+  G.explosions.push({ x: b.x, y: b.y, r: 120, life: 0.3, maxLife: 0.3, color: '#4de3ff', thin: true });
+}
+
+function updateHazards(dt) {
+  const p = G.player;
+
+  // 탄력 버섯
+  for (const b of G.bouncers) {
+    b.t += dt * 3;
+    b.squash = Math.max(0, b.squash - dt * 2.4);
+    if (dist2(b.x, b.y, p.x, p.y) < (b.r + p.r) * (b.r + p.r) && b.squash <= 0.05) {
+      launchBouncer(b);
+    }
+  }
+
+  // 폭발성 결정
+  for (let i = G.volatiles.length - 1; i >= 0; i--) {
+    const v = G.volatiles[i];
+    v.t += dt * 4;
+    if (v.fuse > 0) {
+      v.fuse -= dt;
+      if (v.fuse <= 0) detonateVolatile(v);
+      continue;
+    }
+    if (v.armed && dist2(v.x, v.y, p.x, p.y) < (v.r + p.r) * (v.r + p.r)) {
+      v.fuse = 0.1; // 접촉 → 아주 짧은 예고 후 폭발
+    }
+  }
+
+  // 간헐천: 예고 → 분출
+  for (const gh of G.geysers) {
+    gh.t -= dt;
+    if (gh.state === 'idle') {
+      // 분출 예고 파티클
+      if (Math.random() < dt * 8) {
+        G.particles.push({ x: gh.x + rand(-14, 14), y: gh.y, vx: rand(-10, 10), vy: rand(-60, -30), life: 0.4, maxLife: 0.4, size: rand(2, 4), color: 'rgba(255,140,60,0.5)', grav: -40, shape: 'wisp' });
+      }
+      if (gh.t <= 0) { gh.state = 'warn'; gh.t = 0.7; SFX.play('charge', gh.x); }
+    } else if (gh.state === 'warn') {
+      if (Math.random() < dt * 30) {
+        G.particles.push({ x: gh.x + rand(-16, 16), y: gh.y, vx: rand(-14, 14), vy: rand(-110, -60), life: 0.35, maxLife: 0.35, size: rand(2, 5), color: '#ff8a3d', grav: 0 });
+      }
+      if (gh.t <= 0) { gh.state = 'erupt'; gh.t = 0.85; SFX.play('boom', gh.x); kickCam(gh.x - p.x, gh.y - p.y, 5); }
+    } else if (gh.state === 'erupt') {
+      // 화염 기둥 파티클
+      for (let k = 0; k < 3; k++) {
+        const a = Math.random() * TAU;
+        G.particles.push({ x: gh.x + Math.cos(a) * rand(0, gh.r * 0.5), y: gh.y, vx: Math.cos(a) * rand(20, 60), vy: rand(-460, -260), life: rand(0.3, 0.55), maxLife: 0.55, size: rand(3, 7), color: choice(['#ff8a3d', '#ffd23f', '#ff5a1f']), grav: 320 });
+      }
+      // 판정
+      if (dist2(gh.x, gh.y, p.x, p.y) < (gh.r + p.r) * (gh.r + p.r) && p.iFrames <= 0) {
+        hurtPlayer(24 + G.minute, gh.x, gh.y);
+        p.iFrames = 0.6;
+      }
+      if (gh.t <= 0) { gh.state = 'idle'; gh.t = rand(2.4, 3.6); }
+    }
+  }
+}
+
+function drawHazards(ctx) {
+  // 탄력 버섯
+  for (const b of G.bouncers) {
+    const sq = 1 - b.squash * 0.45;
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath(); ctx.ellipse(0, 12, 22, 7, 0, 0, TAU); ctx.fill();
+    ctx.globalCompositeOperation = 'lighter';
+    Glow.draw(ctx, '#2ee6d8', 0, -8, 44, 0.5 + b.squash * 0.4);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#1d4a52';
+    ctx.fillRect(-6, -6, 12, 16);
+    ctx.fillStyle = '#2ee6d8';
+    ctx.beginPath();
+    ctx.ellipse(0, -12 * sq, 24, 13 * sq, 0, Math.PI, 0);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(220,255,255,0.7)';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.beginPath(); ctx.ellipse(-8, -16 * sq, 6, 3, -0.3, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+
+  // 폭발성 결정 (위험 예고로 붉게 맥동)
+  for (const v of G.volatiles) {
+    const armed = v.fuse > 0;
+    const pulse = armed ? 1 + Math.sin(v.t * 8) * 0.3 : 1 + Math.sin(v.t) * 0.1;
+    ctx.save();
+    ctx.translate(v.x, v.y);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath(); ctx.ellipse(0, 10, 18, 6, 0, 0, TAU); ctx.fill();
+    ctx.globalCompositeOperation = 'lighter';
+    Glow.draw(ctx, armed ? '#ff3b2d' : '#ff7a2d', 0, -6, 40 * pulse, 0.55);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = armed ? '#ff4d33' : '#c94a1d';
+    ctx.beginPath();
+    ctx.moveTo(0, -30 * pulse); ctx.lineTo(-13, -6); ctx.lineTo(-5, 8); ctx.lineTo(6, 8); ctx.lineTo(12, -10);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#ffb060';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,220,180,0.55)';
+    ctx.beginPath(); ctx.moveTo(0, -28 * pulse); ctx.lineTo(-5, -8); ctx.lineTo(-1, 4); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  // 간헐천
+  for (const gh of G.geysers) {
+    ctx.save();
+    ctx.translate(gh.x, gh.y);
+    // 분출구
+    ctx.fillStyle = '#1a0f0a';
+    ctx.beginPath(); ctx.ellipse(0, 4, gh.r * 0.7, gh.r * 0.28, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#ff7a2d';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(0, 4, gh.r * 0.7, gh.r * 0.28, 0, 0, TAU); ctx.stroke();
+    if (gh.state === 'warn') {
+      // 예고: 솟아오르는 발광
+      const w = 1 - gh.t / 0.7;
+      ctx.globalCompositeOperation = 'lighter';
+      Glow.draw(ctx, '#ff8a3d', 0, -10, gh.r * (0.5 + w), 0.35 + w * 0.4);
+      ctx.globalCompositeOperation = 'source-over';
+    } else if (gh.state === 'erupt') {
+      // 화염 기둥
+      ctx.globalCompositeOperation = 'lighter';
+      const hgt = 190 * Math.sin((1 - gh.t / 0.85) * Math.PI);
+      const grad = ctx.createLinearGradient(0, 0, 0, -hgt);
+      grad.addColorStop(0, 'rgba(255,230,120,0.95)');
+      grad.addColorStop(0.5, 'rgba(255,120,40,0.8)');
+      grad.addColorStop(1, 'rgba(255,60,20,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(-gh.r * 0.55, 0);
+      ctx.quadraticCurveTo(-gh.r * 0.3, -hgt * 0.6, 0, -hgt);
+      ctx.quadraticCurveTo(gh.r * 0.3, -hgt * 0.6, gh.r * 0.55, 0);
+      ctx.closePath(); ctx.fill();
+      Glow.draw(ctx, '#ff7a2d', 0, -hgt * 0.4, gh.r * 2.2, 0.7);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    ctx.restore();
+  }
 }
 
 /* ============================================================

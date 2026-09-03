@@ -121,6 +121,17 @@ function zoomPunchCam(amount) {
  * ============================================================ */
 const Glow = {
   cache: new Map(),
+  midColor(color) {
+    // 어떤 색 형식이든 반투명 중간 색으로 변환
+    if (color.startsWith('hsl(')) return color.replace('hsl(', 'hsla(').replace(')', ',0.45)');
+    if (color.startsWith('hsla(') || color.startsWith('rgba(')) return color;
+    if (color.startsWith('rgb(')) return color.replace('rgb(', 'rgba(').replace(')', ',0.45)');
+    if (color.startsWith('#')) {
+      const r = parseInt(color.slice(1, 3), 16), g2 = parseInt(color.slice(3, 5), 16), b = parseInt(color.slice(5, 7), 16);
+      return `rgba(${r},${g2},${b},0.45)`;
+    }
+    return color;
+  },
   get(color) {
     let c = this.cache.get(color);
     if (c) return c;
@@ -129,7 +140,7 @@ const Glow = {
     const x = c.getContext('2d');
     const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
     g.addColorStop(0, color);
-    g.addColorStop(0.35, color.replace('hsl(', 'hsla(').replace(')', ',0.45)'));
+    g.addColorStop(0.35, this.midColor(color));
     g.addColorStop(1, 'rgba(0,0,0,0)');
     x.fillStyle = g;
     x.fillRect(0, 0, 64, 64);

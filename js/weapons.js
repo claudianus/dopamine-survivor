@@ -166,6 +166,9 @@ function updateWeapons(dt) {
         const last = c.hitOrbit || 0;
         if (G.time - last > 0.4) { c.hitOrbit = G.time; damageCrystal(c, lv.dmg * dmgM); }
       }
+      for (const v of queryVolatiles(ox, oy, 24)) {
+        if (!v.fuse) v.fuse = 0.01;
+      }
     }
   }
 
@@ -189,6 +192,10 @@ function updateWeapons(dt) {
       }
       for (const c of queryCrystals(p.x, p.y, lv.r)) {
         damageCrystal(c, lv.dmg * dmgM);
+        hitAny = true;
+      }
+      for (const v of queryVolatiles(p.x, p.y, lv.r)) {
+        if (!v.fuse) v.fuse = 0.01;
         hitAny = true;
       }
       if (hitAny) G.auraPulse = 1;
@@ -220,9 +227,10 @@ function fireWeapon(id, lv, dmgM) {
       break;
     }
     case 'lightning': {
-      // 결정도 후보에 포함 (번개는 결정도 친다!)
+      // 결정·폭발성 결정도 후보에 포함
       const cands = G.enemies.filter(e => dist2(e.x, e.y, p.x, p.y) < 380 * 380)
-        .concat(G.crystals.filter(c => dist2(c.x, c.y, p.x, p.y) < 380 * 380).map(c => ({ crystal: c, x: c.x, y: c.y })));
+        .concat(G.crystals.filter(c => dist2(c.x, c.y, p.x, p.y) < 380 * 380).map(c => ({ crystal: c, x: c.x, y: c.y })))
+        .concat(G.volatiles.filter(v => dist2(v.x, v.y, p.x, p.y) < 380 * 380).map(v => ({ volatile: v, x: v.x, y: v.y })));
       if (!cands.length) return;
       const chained = new Set();
       for (let i = 0; i < lv.count; i++) {
@@ -306,6 +314,10 @@ function strikeLightning(x, y, lv, dmgM, chained) {
     damageCrystal(c, lv.dmg * dmgM);
     hitSomething = true;
   }
+  for (const v of queryVolatiles(x, y, lv.aoe)) {
+    if (!v.fuse) v.fuse = 0.01;
+    hitSomething = true;
+  }
   if (hitSomething) {
     for (let k = 0; k < 8; k++) {
       const a2 = Math.random() * TAU;
@@ -358,6 +370,13 @@ function updateProjectiles(dt) {
         for (const c of queryCrystals(b.x, b.y, b.r)) {
           damageCrystal(c, b.dmg);
           if (b.remaining-- <= 0) dead = true;
+          break;
+        }
+      }
+      if (!dead) {
+        for (const v of queryVolatiles(b.x, b.y, b.r)) {
+          if (!v.fuse) v.fuse = 0.01; // 유발 폭발!
+          dead = true;
           break;
         }
       }
@@ -416,6 +435,9 @@ function updateProjectiles(dt) {
         b.hitCry = c; b.hitCryT = G.time;
         damageCrystal(c, b.dmg);
       }
+      for (const v of queryVolatiles(b.x, b.y, b.r)) {
+        if (!v.fuse) v.fuse = 0.01;
+      }
       if (b.life <= 0) G.projectiles.splice(i, 1);
     }
     else if (b.kind === 'grenade') {
@@ -440,6 +462,9 @@ function updateProjectiles(dt) {
         }
         for (const c of queryCrystals(b.x, b.y, b.aoe)) {
           damageCrystal(c, b.dmg);
+        }
+        for (const v of queryVolatiles(b.x, b.y, b.aoe)) {
+          if (!v.fuse) v.fuse = 0.01;
         }
         // 진화: 산탄 폭발
         if (b.cluster) {
@@ -471,6 +496,9 @@ function updateProjectiles(dt) {
         if (b.hitCry === c) continue;
         b.hitCry = c;
         damageCrystal(c, b.dmg);
+      }
+      for (const v of queryVolatiles(b.x, b.y, b.r + 8)) {
+        if (!v.fuse) v.fuse = 0.01;
       }
       if (b.life <= 0) G.projectiles.splice(i, 1);
     }
@@ -641,10 +669,15 @@ function drawProjectiles(ctx) {
       ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.5, 0, TAU); ctx.fill();
     }
     else if (b.kind === 'boomerang') {
+      // 모션 스미어: 속도 반대편으로 늘어진 발광 잔상
+      const spNow = Math.hypot(b.vx, b.vy) || 1;
+      ctx.globalCompositeOperation = 'lighter';
+      Glow.draw(ctx, b.isMini ? '#ffb0e0' : '#ff9f1c', b.x - (b.vx / spNow) * 16, b.y - (b.vy / spNow) * 16, 26, 0.45);
+      ctx.globalCompositeOperation = 'source-over';
       ctx.save();
       ctx.translate(b.x, b.y);
       ctx.rotate(b.spin);
-      ctx.fillStyle = '#ff9f1c';
+      ctx.fillStyle = b.isMini ? '#ffb0e0' : '#ff9f1c';
       MapGen.rr(ctx, -13, -4, 26, 8, 4); ctx.fill();
       ctx.fillStyle = '#ffd23f';
       MapGen.rr(ctx, -13, -4, 12, 8, 4); ctx.fill();

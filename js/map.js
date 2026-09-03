@@ -27,7 +27,7 @@ const BIOME_INFO = {
 
 const MapGen = {
   seed: 1,
-  nE: null, nM: null, nT: null, nC: null, nD: null,
+  nE: null, nM: null, nT: null, nC: null, nD: null, nF: null,
   chunks: new Map(),
   mmCache: null, mmTime: 0,
 
@@ -38,6 +38,7 @@ const MapGen = {
     this.nT = new SimplexNoise(Mulberry32(this.seed + 303));
     this.nC = new SimplexNoise(Mulberry32(this.seed + 404));
     this.nD = new SimplexNoise(Mulberry32(this.seed + 505));
+    this.nF = new SimplexNoise(Mulberry32(this.seed + 606)); // 지형 피처 필드
     for (const c of this.chunks.values()) c.canvas = null;
     this.chunks.clear();
     this.mmCache = null;
@@ -66,8 +67,106 @@ const MapGen = {
 
   /* 픽셀 좌표 → 지형 이동 속도 배율 */
   groundSpeed(x, y) {
-    const b = this.biome(Math.floor(x / TILE), Math.floor(y / TILE));
-    return BIOME_INFO[b].spd;
+    return this.groundProps(x, y).spd;
+  },
+
+  /* 지형 피처 판정 (결정적: 시각 = 판정 항상 일치) */
+  featureFor(b, tx, ty) {
+    const h = hashi(tx * 5, ty * 11, this.seed + 77);
+    switch (b) {
+      case B_WATER:
+        // 해수면 아래 깊은 곳: 심수 (통과 불가)
+        return (this.nE.noise2D(tx / 34, ty / 34) < -0.42) ? 'deep' : null;
+      case B_SNOW:
+        // 빙판 지대 (미끄러움)
+        return (this.nF.noise2D(tx / 9, ty / 9) > 0.28) ? 'ice' : null;
+      case B_FOREST:
+        // 수렁 (진흙)
+        return (this.nF.noise2D(tx / 9, ty / 9) > 0.3 && h < 0.45) ? 'mud' : null;
+      case B_DESERT:
+        return (h < 0.07) ? 'thorn' : null;
+      case B_GRASS:
+        return (h < 0.035) ? 'thorn' : null;
+    }
+    return null;
+  },
+
+  featureAt(wx, wy) {
+    const tx = Math.floor(wx / TILE), ty = Math.floor(wy / TILE);
+    return this.featureFor(this.biome(tx, ty), tx, ty);
+  },
+
+  /* 지형 물리 속성: 속도 배율 + 가속/마찰 + 특수 플래그 */
+  groundProps(x, y) {
+    const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE);
+    const b = this.biome(tx, ty);
+    let spd = BIOME_INFO[b].spd, accel = 12;
+    let deep = false, ice = false, mud = false, thorn = false;
+    const f = this.featureFor(b, tx, ty);
+    if (f === 'deep') { deep = true; }
+    else if (f === 'ice') { spd = Math.max(spd, 1.07); accel = 2.0; ice = true; }
+    else if (f === 'mud') { spd *= 0.55; accel = 9; mud = true; }
+    else if (f === 'thorn') { spd *= 0.62; thorn = true; }
+    return { spd, accel, deep, ice, mud, thorn, biome: b };
+  },
+
+  /* 지형 피처 시각화 (청크 캔버스에 베이크) */
+  drawFeature(ctx, f, px, py, wtx, wty, rng) {
+    const h = hashi(wtx * 3, wty * 7, this.seed + 31);
+    switch (f) {
+      case 'deep':
+        ctx.fillStyle = 'rgba(4,10,26,0.62)';
+        ctx.fillRect(px, py, TILE, TILE);
+        ctx.strokeStyle = 'rgba(90,140,200,0.16)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(px + h * 20, py + 22); ctx.quadraticCurveTo(px + 32, py + 30, px + 54, py + 24);
+        ctx.stroke();
+        break;
+      case 'ice':
+        ctx.fillStyle = 'rgba(185,228,255,0.4)';
+        ctx.fillRect(px, py, TILE, TILE);
+        ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(px + h * 40, py + 6); ctx.lineTo(px + 20 + h * 20, py + 36); ctx.lineTo(px + 30, py + 60);
+        ctx.moveTo(px + 8, py + h * 50); ctx.lineTo(px + 44, py + 20 + h * 20);
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255,255,255,0.18)';
+        ctx.beginPath();
+        ctx.moveTo(px + h * 30, py); ctx.lineTo(px + h * 30 + 26, py); ctx.lineTo(px + h * 30 - 12, py + TILE);
+        ctx.closePath(); ctx.fill();
+        break;
+      case 'mud':
+        ctx.fillStyle = 'rgba(44,30,18,0.55)';
+        ctx.beginPath();
+        ctx.ellipse(px + 20 + h * 16, py + 22, 22, 15, h * 3, 0, TAU);
+        ctx.ellipse(px + 44, py + 46, 18, 12, h * 2, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(90,64,38,0.4)';
+        ctx.beginPath();
+        ctx.ellipse(px + 22 + h * 14, py + 20, 12, 7, h * 3, 0, TAU);
+        ctx.fill();
+        break;
+      case 'thorn': {
+        ctx.strokeStyle = 'rgba(24,16,10,0.85)';
+        ctx.lineWidth = 2.6;
+        ctx.beginPath();
+        ctx.moveTo(px + 8, py + 56); ctx.lineTo(px + 26, py + 20);
+        ctx.moveTo(px + 30, py + 58); ctx.lineTo(px + 44, py + 26);
+        ctx.moveTo(px + 52, py + 56); ctx.lineTo(px + 38, py + 30);
+        ctx.moveTo(px + 16, py + 40); ctx.lineTo(px + 34, py + 34);
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(150,40,40,0.8)';
+        for (let i = 0; i < 3; i++) {
+          const sx = px + 14 + i * 16 + h * 8, sy = py + 24 + h * 14 - i * 6;
+          ctx.beginPath();
+          ctx.moveTo(sx, sy); ctx.lineTo(sx + 3.5, sy - 8); ctx.lineTo(sx + 7, sy);
+          ctx.closePath(); ctx.fill();
+        }
+        break;
+      }
+    }
   },
 
   isLava(x, y) {
@@ -100,6 +199,10 @@ const MapGen = {
 
         // 타일 디테일
         this.tileDetail(ctx, b, px, py, wtx, wty, rng);
+
+        // 지형 피처 (빙판/진흙/심수/가시 — 시각 베이크)
+        const feat = this.featureFor(b, wtx, wty);
+        if (feat) this.drawFeature(ctx, feat, px, py, wtx, wty, rng);
 
         // 장식 후보 수집
         const de = this.decoFor(b, wtx, wty, rng);

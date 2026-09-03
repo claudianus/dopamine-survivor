@@ -98,6 +98,8 @@ function openLevelUp() {
   G.pendingLevelUps--;
   SFX.play('levelup');
   shakeCam(4);
+  POST.triggerChroma(0.3);
+  POST.triggerFlash(0.08);
   // 레벨업 폭발 이펙트
   const p = G.player;
   for (let i = 0; i < 30; i++) {
