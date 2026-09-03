@@ -6,6 +6,148 @@
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
+/* ============================================================
+ * 다이내믹 라이팅 시스템 — 라이트맵 multiply + 컬러 블룸
+ * ============================================================ */
+const LIGHTS = {
+  canvas: null, ctx: null, scale: 0.5,
+  lavaCache: [], lastLavaT: -1,
+  bloom: [],
+
+  init() {
+    this.canvas = document.createElement('canvas');
+    this.ctx = this.canvas.getContext('2d');
+    this.resize();
+  },
+  resize() {
+    if (!this.canvas) return;
+    this.canvas.width = Math.max(2, (G.view.w * this.scale) | 0);
+    this.canvas.height = Math.max(2, (G.view.h * this.scale) | 0);
+  },
+
+  /* 가시 영역 용암 타일 캐시 (0.5초마다 갱신) */
+  sampleLava(camL, camT, vw, vh) {
+    if (G.time - this.lastLavaT < 0.5) return;
+    this.lastLavaT = G.time;
+    this.lavaCache = [];
+    const step = TILE * 2;
+    for (let wy = Math.floor(camT / step) * step; wy < camT + vh; wy += step) {
+      for (let wx = Math.floor(camL / step) * step; wx < camL + vw; wx += step) {
+        if (MapGen.biome(Math.floor(wx / TILE), Math.floor(wy / TILE)) === B_LAVA) {
+          this.lavaCache.push({ x: wx + TILE / 2, y: wy + TILE / 2 });
+          if (this.lavaCache.length > 26) return;
+        }
+      }
+    }
+  },
+
+  /* 광원 수집 → 라이트맵 렌더 → multiply 합성 → 블룸 */
+  render(camL, camT, shx, shy, kx, ky, zoom) {
+    const lc = this.ctx, W = this.canvas.width, H = this.canvas.height;
+    const p = G.player;
+    const vw = G.view.w / zoom, vh = G.view.h / zoom;
+    this.sampleLava(camL, camT, vw, vh);
+    const T = G.time;
+    const rushOn = G.rage && G.rage.active;
+    const flicker = (x, base) => base * (0.88 + 0.12 * Math.sin(T * 11 + x * 0.013));
+
+    // 광원 수집
+    const L = [];
+    // 플레이어 코어: 최대 광원
+    L.push({
+      x: p.x, y: p.y,
+      r: rushOn ? 330 : 215,
+      color: rushOn ? `hsl(${(T * 220) % 360},100%,70%)` : '#a8dcff',
+      a: flicker(0, 1.0),
+      bloom: 0.16,
+    });
+    // 폭발/충격파: 강한 플래시
+    for (const ex of G.explosions) {
+      const t = ex.life / ex.maxLife;
+      L.push({ x: ex.x, y: ex.y, r: ex.r * 2.4, color: ex.color || '#ff9a3d', a: t, bloom: t * 0.3 });
+    }
+    // 도파민 결정: 색조 쉬머
+    for (const c of G.crystals) {
+      L.push({ x: c.x, y: c.y, r: 140, color: `hsl(${c.hue + Math.sin(c.wobble) * 14},100%,66%)`, a: flicker(c.x, 0.85), bloom: 0.12 });
+    }
+    // 용암: 화염광
+    for (const lv of this.lavaCache) {
+      L.push({ x: lv.x, y: lv.y, r: 150, color: '#ff5a1f', a: flicker(lv.x, 0.6), bloom: 0 });
+    }
+    // 엘리트/보스
+    for (const e of G.enemies) {
+      if (e.elite || e.boss) L.push({ x: e.x, y: e.y, r: e.boss ? 240 : 150, color: e.boss ? '#ff2d4e' : '#ffaa2d', a: flicker(e.x, 0.7), bloom: 0 });
+    }
+    // 마탄·레이저·유탄: 움직이는 빛
+    for (const b of G.projectiles) {
+      if (b.kind === 'bolt') L.push({ x: b.x, y: b.y, r: 85, color: b.pierce ? `hsl(${(T * 400) % 360},100%,70%)` : '#4de3ff', a: 0.9, bloom: 0 });
+      else if (b.kind === 'lance') L.push({ x: b.x, y: b.y, r: 110, color: '#b388ff', a: 0.8, bloom: 0 });
+      else if (b.kind === 'grenade') L.push({ x: b.x, y: b.y, r: 55, color: '#ff6b35', a: 0.5, bloom: 0 });
+    }
+    // 적 투사체
+    for (const b of G.eProjectiles) {
+      L.push({ x: b.x, y: b.y, r: 60, color: b.color, a: 0.7, bloom: 0 });
+    }
+    // 젬 (가까운 것만)
+    let gemCount = 0;
+    for (const pk of G.pickups) {
+      if (pk.kind !== 'gem') continue;
+      if (dist2(pk.x, pk.y, p.x, p.y) < 500 * 500) {
+        L.push({ x: pk.x, y: pk.y, r: 42, color: pk.val >= 10 ? '#b06cff' : (pk.val >= 3 ? '#ff4d9d' : '#4de3ff'), a: 0.4, bloom: 0 });
+        if (++gemCount > 10) break;
+      }
+    }
+    // 상자
+    for (const pk of G.pickups) {
+      if (pk.kind === 'chest') L.push({ x: pk.x, y: pk.y, r: 110, color: '#e8b74a', a: flicker(pk.x, 0.6), bloom: 0.1 });
+    }
+    // 상한: 화면 중심에서 가까운 순
+    if (L.length > 46) {
+      L.sort((a, b) => dist2(a.x, a.y, p.x, p.y) - dist2(b.x, b.y, p.x, p.y));
+      L.length = 46;
+    }
+
+    // 주변광(앰비언트): 밤이 어두워지고, 러시 시 따뜻해짐
+    const day = G.dayTint || 0;
+    const amb = [
+      Math.round(lerp(lerp(112, 74, day), 128, rushOn ? 0.5 : 0)),
+      Math.round(lerp(lerp(120, 82, day), 96, rushOn ? 0.5 : 0)),
+      Math.round(lerp(lerp(152, 122, day), 118, rushOn ? 0.5 : 0)),
+    ];
+    lc.setTransform(1, 0, 0, 1, 0, 0);
+    lc.globalCompositeOperation = 'source-over';
+    lc.fillStyle = `rgb(${amb[0]},${amb[1]},${amb[2]})`;
+    lc.fillRect(0, 0, W, H);
+
+    // 라이트맵에 광원 가산
+    const s = zoom * this.scale;
+    lc.globalCompositeOperation = 'lighter';
+    for (const l of L) {
+      Glow.draw(lc, l.color, (l.x - camL) * s, (l.y - camT) * s, l.r * s, l.a);
+    }
+
+    // 씬에 multiply 합성 (어둠 속 대비)
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.drawImage(this.canvas, 0, 0, G.view.w, G.view.h);
+    ctx.globalCompositeOperation = 'source-over';
+
+    // 컬러 블룸: 주요 광원이 지면을 물들이게
+    this.bloom.length = 0;
+    for (const l of L) if (l.bloom > 0) this.bloom.push(l);
+    if (this.bloom.length) {
+      ctx.save();
+      ctx.scale(zoom, zoom);
+      ctx.translate(-camL + shx, -camT + shy);
+      ctx.globalCompositeOperation = 'lighter';
+      for (const l of this.bloom) {
+        Glow.draw(ctx, l.color, l.x, l.y, l.r * 1.15, l.bloom);
+      }
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.restore();
+    }
+  },
+};
+
 /* ---------- 초기화 ---------- */
 function resize() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -21,7 +163,8 @@ function resize() {
   G.vigGrad = ctx.createRadialGradient(G.view.w / 2, G.view.h / 2, Math.min(G.view.w, G.view.h) * 0.36,
                                        G.view.w / 2, G.view.h / 2, Math.max(G.view.w, G.view.h) * 0.72);
   G.vigGrad.addColorStop(0, 'rgba(0,0,0,0)');
-  G.vigGrad.addColorStop(1, 'rgba(0,0,0,0.52)');
+  G.vigGrad.addColorStop(1, 'rgba(0,0,0,0.42)');
+  if (LIGHTS.canvas) LIGHTS.resize();
 }
 window.addEventListener('resize', resize);
 
@@ -433,9 +576,14 @@ function render() {
   ctx.globalAlpha = 1;
   ctx.restore();
 
+  /* ---------- 다이내믹 라이팅 (라이트맵 + 블룸) ---------- */
+  if (G.player && LIGHTS.canvas) {
+    LIGHTS.render(cam.x - shx - kx, cam.y - shy - ky, shx, shy, kx, ky, zoom);
+  }
+
   /* ---------- 포스트 FX (시네마틱 그레이딩) ---------- */
-  // 쿨톤 그레이딩
-  ctx.fillStyle = 'rgba(10,14,30,0.14)';
+  // 쿨톤 그레이딩 (라이팅이 대비를 담당하므로 살짝만)
+  ctx.fillStyle = 'rgba(10,14,30,0.07)';
   ctx.fillRect(0, 0, G.view.w, G.view.h);
   // 밤 틴트
   if (G.dayTint > 0.05) {
@@ -924,6 +1072,7 @@ function bindUI() {
 /* ---------- 부팅 ---------- */
 window.addEventListener('load', () => {
   resize();
+  LIGHTS.init();
   bindUI();
   G.state = 'title';
   requestAnimationFrame(loop);

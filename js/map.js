@@ -13,16 +13,16 @@ const B_WATER = 0, B_SAND = 1, B_GRASS = 2, B_FOREST = 3, B_SNOW = 4,
       B_DESERT = 5, B_VOLCANIC = 6, B_CRYSTAL = 7, B_ROCK = 8, B_LAVA = 9;
 
 const BIOME_INFO = {
-  [B_WATER]:   { name: '심연 호수', base: [16, 34, 64],  spd: 0.55 },
-  [B_SAND]:    { name: '해변',   base: [138, 120, 86], spd: 1.0 },
-  [B_GRASS]:   { name: '초원',   base: [38, 80, 56],   spd: 1.0 },
-  [B_FOREST]:  { name: '흑림',   base: [23, 58, 40],   spd: 0.95 },
-  [B_SNOW]:    { name: '설원',   base: [138, 152, 174], spd: 1.0 },
-  [B_DESERT]:  { name: '사막',   base: [124, 86, 52],  spd: 1.0 },
-  [B_VOLCANIC]:{ name: '화산지대', base: [36, 25, 31], spd: 1.0 },
-  [B_CRYSTAL]: { name: '도파민 광산', base: [50, 33, 84], spd: 1.0 },
-  [B_ROCK]:    { name: '암석지대', base: [66, 70, 80], spd: 1.0 },
-  [B_LAVA]:    { name: '용암',   base: [255, 96, 32], spd: 0.85 },
+  [B_WATER]:   { name: '심연 호수', base: [26, 52, 96],  spd: 0.55 },
+  [B_SAND]:    { name: '해변',   base: [176, 152, 110], spd: 1.0 },
+  [B_GRASS]:   { name: '초원',   base: [54, 106, 74],   spd: 1.0 },
+  [B_FOREST]:  { name: '흑림',   base: [34, 78, 54],   spd: 0.95 },
+  [B_SNOW]:    { name: '설원',   base: [172, 186, 208], spd: 1.0 },
+  [B_DESERT]:  { name: '사막',   base: [158, 112, 68], spd: 1.0 },
+  [B_VOLCANIC]:{ name: '화산지대', base: [50, 36, 44], spd: 1.0 },
+  [B_CRYSTAL]: { name: '도파민 광산', base: [72, 48, 122], spd: 1.0 },
+  [B_ROCK]:    { name: '암석지대', base: [92, 96, 108], spd: 1.0 },
+  [B_LAVA]:    { name: '용암',   base: [255, 110, 40], spd: 0.85 },
 };
 
 const MapGen = {
@@ -184,19 +184,19 @@ const MapGen = {
       case 'tree':
         ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(0, 6, 16, 6, 0, 0, TAU); ctx.fill();
         ctx.fillStyle = '#3a2a1c'; ctx.fillRect(-4, -14, 8, 20);
-        ctx.fillStyle = '#1a4a2c'; ctx.beginPath(); ctx.arc(0, -26, 17, 0, TAU); ctx.fill();
-        ctx.fillStyle = '#256b3f'; ctx.beginPath(); ctx.arc(-7, -31, 11, 0, TAU); ctx.arc(9, -29, 10, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#256b3f'; ctx.beginPath(); ctx.arc(0, -26, 17, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#349156'; ctx.beginPath(); ctx.arc(-7, -31, 11, 0, TAU); ctx.arc(9, -29, 10, 0, TAU); ctx.fill();
         break;
       case 'pine':
         ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(0, 5, 14, 5, 0, 0, TAU); ctx.fill();
         ctx.fillStyle = '#3a2a1c'; ctx.fillRect(-3, -8, 6, 13);
-        ctx.fillStyle = '#123824';
+        ctx.fillStyle = '#1a4a2e';
         for (let i = 0; i < 3; i++) {
           ctx.beginPath();
           ctx.moveTo(0, -40 + i * 12); ctx.lineTo(-13 + i * 2, -18 + i * 10); ctx.lineTo(13 - i * 2, -18 + i * 10);
           ctx.closePath(); ctx.fill();
         }
-        ctx.fillStyle = 'rgba(200,220,255,0.5)';
+        ctx.fillStyle = 'rgba(210,228,255,0.55)';
         ctx.beginPath(); ctx.moveTo(0, -40); ctx.lineTo(-6, -28); ctx.lineTo(6, -28); ctx.closePath(); ctx.fill();
         break;
       case 'cactus':
