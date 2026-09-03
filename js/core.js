@@ -99,5 +99,71 @@ class SimplexNoise {
 function shakeCam(power) {
   const cam = G.camera;
   const p = cam.shake + power;
-  cam.shake = Math.min(p, 26);
+  cam.shake = Math.min(p, 14);
+}
+
+/* 방향성 임팩트 (흔들림 대체: 화면을 특정 방향으로 툭 밀침) */
+function kickCam(dx, dy, power) {
+  const cam = G.camera;
+  const d = Math.hypot(dx, dy) || 1;
+  cam.kickX = (cam.kickX || 0) + (dx / d) * power;
+  cam.kickY = (cam.kickY || 0) + (dy / d) * power;
+}
+
+/* 줌 펀치 (순간 확대 후 복귀) */
+function zoomPunchCam(amount) {
+  const cam = G.camera;
+  cam.punch = Math.min((cam.punch || 0) + amount, 0.07);
+}
+
+/* ============================================================
+ * 글로우 스프라이트 캐시 — 기술 데모급 발광을 저렴하게
+ * ============================================================ */
+const Glow = {
+  cache: new Map(),
+  get(color) {
+    let c = this.cache.get(color);
+    if (c) return c;
+    c = document.createElement('canvas');
+    c.width = 64; c.height = 64;
+    const x = c.getContext('2d');
+    const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+    g.addColorStop(0, color);
+    g.addColorStop(0.35, color.replace('hsl(', 'hsla(').replace(')', ',0.45)'));
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    x.fillStyle = g;
+    x.fillRect(0, 0, 64, 64);
+    this.cache.set(color, c);
+    return c;
+  },
+  draw(ctx, color, x, y, radius, alpha = 1) {
+    const s = this.get(color);
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(s, x - radius, y - radius, radius * 2, radius * 2);
+    ctx.globalAlpha = 1;
+  },
+};
+
+/* 파편(삼각형) 파티클 생성 */
+function shardBurst(x, y, color, n, speed = 260, size = 5) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * TAU, s = rand(speed * 0.3, speed);
+    G.particles.push({
+      x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+      life: rand(0.35, 0.8), maxLife: 0.8, size: rand(size * 0.5, size),
+      color, grav: 420, shape: 'shard', rot: Math.random() * TAU, vrot: rand(-9, 9),
+    });
+  }
+}
+
+/* 피격 스파크 (짧고 밝은 직선 파편) */
+function sparkBurst(x, y, color, n = 6, speed = 340) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * TAU, s = rand(speed * 0.4, speed);
+    G.particles.push({
+      x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+      life: rand(0.1, 0.26), maxLife: 0.26, size: rand(1.5, 3),
+      color, grav: 0, shape: 'spark', rot: a,
+    });
+  }
 }

@@ -13,16 +13,16 @@ const B_WATER = 0, B_SAND = 1, B_GRASS = 2, B_FOREST = 3, B_SNOW = 4,
       B_DESERT = 5, B_VOLCANIC = 6, B_CRYSTAL = 7, B_ROCK = 8, B_LAVA = 9;
 
 const BIOME_INFO = {
-  [B_WATER]:   { name: '호수',   base: [27, 59, 111],  spd: 0.55 },
-  [B_SAND]:    { name: '해변',   base: [233, 208, 156], spd: 1.0 },
-  [B_GRASS]:   { name: '초원',   base: [76, 175, 109], spd: 1.0 },
-  [B_FOREST]:  { name: '숲',     base: [46, 125, 79],  spd: 0.95 },
-  [B_SNOW]:    { name: '설원',   base: [223, 233, 245], spd: 1.0 },
-  [B_DESERT]:  { name: '사막',   base: [222, 158, 82], spd: 1.0 },
-  [B_VOLCANIC]:{ name: '화산지대', base: [74, 48, 56], spd: 1.0 },
-  [B_CRYSTAL]: { name: '도파민 광산', base: [91, 59, 143], spd: 1.0 },
-  [B_ROCK]:    { name: '암석지대', base: [138, 143, 152], spd: 1.0 },
-  [B_LAVA]:    { name: '용암',   base: [255, 90, 31], spd: 0.85 },
+  [B_WATER]:   { name: '심연 호수', base: [16, 34, 64],  spd: 0.55 },
+  [B_SAND]:    { name: '해변',   base: [138, 120, 86], spd: 1.0 },
+  [B_GRASS]:   { name: '초원',   base: [38, 80, 56],   spd: 1.0 },
+  [B_FOREST]:  { name: '흑림',   base: [23, 58, 40],   spd: 0.95 },
+  [B_SNOW]:    { name: '설원',   base: [138, 152, 174], spd: 1.0 },
+  [B_DESERT]:  { name: '사막',   base: [124, 86, 52],  spd: 1.0 },
+  [B_VOLCANIC]:{ name: '화산지대', base: [36, 25, 31], spd: 1.0 },
+  [B_CRYSTAL]: { name: '도파민 광산', base: [50, 33, 84], spd: 1.0 },
+  [B_ROCK]:    { name: '암석지대', base: [66, 70, 80], spd: 1.0 },
+  [B_LAVA]:    { name: '용암',   base: [255, 96, 32], spd: 0.85 },
 };
 
 const MapGen = {
@@ -127,28 +127,28 @@ const MapGen = {
 
   tileDetail(ctx, b, px, py, wtx, wty, rng) {
     const h = hashi(wtx * 3, wty * 7, this.seed + 9);
-    ctx.globalAlpha = 0.25;
+    ctx.globalAlpha = 0.22;
     if (b === B_GRASS || b === B_FOREST) {
-      ctx.fillStyle = h > 0.5 ? '#2e7d4f' : '#66c78f';
+      ctx.fillStyle = h > 0.5 ? '#16351f' : '#2e6344';
       ctx.fillRect(px + h * 40, py + h * 34, 14, 8);
       ctx.fillRect(px + (1 - h) * 38, py + h * 46, 10, 6);
     } else if (b === B_WATER) {
-      ctx.fillStyle = '#3a6ba5';
+      ctx.fillStyle = '#2a4d7d';
       ctx.fillRect(px + h * 30, py + h * 40, 26, 4);
     } else if (b === B_SNOW) {
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = '#d6e4f5';
       ctx.fillRect(px + h * 36, py + h * 30, 12, 6);
     } else if (b === B_DESERT || b === B_SAND) {
-      ctx.fillStyle = '#c78a4a';
+      ctx.fillStyle = '#8a5f36';
       ctx.fillRect(px + h * 40, py + h * 42, 12, 5);
     } else if (b === B_VOLCANIC) {
-      ctx.fillStyle = '#2e1c22';
+      ctx.fillStyle = '#1c1116';
       ctx.fillRect(px + h * 38, py + h * 38, 16, 8);
     } else if (b === B_ROCK) {
-      ctx.fillStyle = '#6f747d';
+      ctx.fillStyle = '#43474f';
       ctx.fillRect(px + h * 36, py + h * 36, 14, 9);
     } else if (b === B_CRYSTAL) {
-      ctx.fillStyle = '#4a2f78';
+      ctx.fillStyle = '#332054';
       ctx.fillRect(px + h * 38, py + h * 38, 12, 7);
     } else if (b === B_LAVA) {
       ctx.fillStyle = '#ffd23f';
@@ -182,26 +182,26 @@ const MapGen = {
     ctx.scale(s, s);
     switch (d.k) {
       case 'tree':
-        ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.beginPath(); ctx.ellipse(0, 6, 16, 6, 0, 0, TAU); ctx.fill();
-        ctx.fillStyle = '#6b4a2f'; ctx.fillRect(-4, -14, 8, 20);
-        ctx.fillStyle = '#2f8f52'; ctx.beginPath(); ctx.arc(0, -26, 17, 0, TAU); ctx.fill();
-        ctx.fillStyle = '#43b86e'; ctx.beginPath(); ctx.arc(-7, -31, 11, 0, TAU); ctx.arc(9, -29, 10, 0, TAU); ctx.fill();
+        ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(0, 6, 16, 6, 0, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#3a2a1c'; ctx.fillRect(-4, -14, 8, 20);
+        ctx.fillStyle = '#1a4a2c'; ctx.beginPath(); ctx.arc(0, -26, 17, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#256b3f'; ctx.beginPath(); ctx.arc(-7, -31, 11, 0, TAU); ctx.arc(9, -29, 10, 0, TAU); ctx.fill();
         break;
       case 'pine':
-        ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.beginPath(); ctx.ellipse(0, 5, 14, 5, 0, 0, TAU); ctx.fill();
-        ctx.fillStyle = '#5d4037'; ctx.fillRect(-3, -8, 6, 13);
-        ctx.fillStyle = '#1d6e46';
+        ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(0, 5, 14, 5, 0, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#3a2a1c'; ctx.fillRect(-3, -8, 6, 13);
+        ctx.fillStyle = '#123824';
         for (let i = 0; i < 3; i++) {
           ctx.beginPath();
           ctx.moveTo(0, -40 + i * 12); ctx.lineTo(-13 + i * 2, -18 + i * 10); ctx.lineTo(13 - i * 2, -18 + i * 10);
           ctx.closePath(); ctx.fill();
         }
-        ctx.fillStyle = 'rgba(255,255,255,0.75)';
+        ctx.fillStyle = 'rgba(200,220,255,0.5)';
         ctx.beginPath(); ctx.moveTo(0, -40); ctx.lineTo(-6, -28); ctx.lineTo(6, -28); ctx.closePath(); ctx.fill();
         break;
       case 'cactus':
-        ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.beginPath(); ctx.ellipse(0, 6, 12, 4, 0, 0, TAU); ctx.fill();
-        ctx.fillStyle = '#3d9e5f';
+        ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.beginPath(); ctx.ellipse(0, 6, 12, 4, 0, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#20563a';
         this.rr(ctx, -5, -26, 10, 32, 5); ctx.fill();
         this.rr(ctx, -14, -18, 8, 12, 4); ctx.fill();
         this.rr(ctx, 6, -22, 8, 12, 4); ctx.fill();
@@ -231,20 +231,20 @@ const MapGen = {
         break;
       }
       case 'flower': {
-        const c = ['#ff5d8f', '#ffd23f', '#35f0ff'][rng() * 3 | 0];
+        const c = ['#a83a5e', '#b08a2a', '#2a8a94'][rng() * 3 | 0];
         ctx.fillStyle = c;
         for (let i = 0; i < 4; i++) {
           const a = i / 4 * TAU;
           ctx.beginPath(); ctx.arc(Math.cos(a) * 4, -4 + Math.sin(a) * 4, 3.4, 0, TAU); ctx.fill();
         }
-        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, -4, 2.6, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#c9d8e8'; ctx.beginPath(); ctx.arc(0, -4, 2.4, 0, TAU); ctx.fill();
         break;
       }
       case 'mushroom':
-        ctx.fillStyle = '#e8e0d0'; ctx.fillRect(-2.6, -6, 5.2, 9);
-        ctx.fillStyle = '#e0455f';
+        ctx.fillStyle = '#8a8272'; ctx.fillRect(-2.6, -6, 5.2, 9);
+        ctx.fillStyle = '#7e2338';
         ctx.beginPath(); ctx.arc(0, -7, 8, Math.PI, 0); ctx.closePath(); ctx.fill();
-        ctx.fillStyle = '#fff';
+        ctx.fillStyle = '#c9a0aa';
         ctx.beginPath(); ctx.arc(-3, -9, 2, 0, TAU); ctx.arc(3.4, -8, 1.6, 0, TAU); ctx.fill();
         break;
       case 'shell':
@@ -279,8 +279,38 @@ const MapGen = {
     }
   },
 
-  /* 미니맵: 주변 바이옴 + 엔티티 점 (0.7초 캐시) */
-  drawMinimap(mctx, W, px, py, enemies, boss) {
+  /* ---------- 시네마틱 안개 레이어 ---------- */
+  fog: [],
+  initFog() {
+    this.fog = [];
+    for (let i = 0; i < 8; i++) {
+      this.fog.push({
+        x: rand(-800, 800), y: rand(-800, 800),
+        r: rand(280, 620), a: rand(0.035, 0.085),
+        vx: rand(6, 22), vy: rand(-8, 8), layer: i % 2,
+      });
+    }
+  },
+  updateFog(dt) {
+    const p = G.player;
+    for (const f of this.fog) {
+      f.x += f.vx * dt; f.y += f.vy * dt;
+      // 화면 밖 멀리 나가면 반대편으로 재배치
+      if (Math.abs(f.x - p.x) > 1900 || Math.abs(f.y - p.y) > 1400) {
+        const a = Math.random() * TAU, d = rand(700, 1300);
+        f.x = p.x + Math.cos(a) * d; f.y = p.y + Math.sin(a) * d;
+        f.r = rand(280, 620);
+      }
+    }
+  },
+  drawFog(ctx, layer) {
+    for (const f of this.fog) {
+      if (f.layer !== layer) continue;
+      Glow.draw(ctx, 'hsl(220,30%,62%)', f.x, f.y, f.r, f.a);
+    }
+  },
+
+  /* 미니맵: 주변 바이옴 + 엔티티 점 (0.7초 캐시) */  drawMinimap(mctx, W, px, py, enemies, boss) {
     const now = performance.now();
     if (!this.mmCache || now - this.mmTime > 700) {
       this.mmTime = now;

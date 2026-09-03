@@ -66,6 +66,7 @@ function spawnEnemy(x, y, typeId, opts = {}) {
   if (opts.elite) {
     e.r *= 1.45; e.hp *= 7; e.maxHp = e.hp; e.dmg *= 1.4; e.xp *= 5; e.spd *= 0.92;
   }
+  e.spawnT = 0.5; // 스폰 포탈 연출
   G.enemies.push(e);
   return e;
 }
@@ -180,9 +181,10 @@ function updateSpawns(dt) {
     if (G.minute >= bd.min && !G.bossSpawned.has(bd.min)) {
       G.bossSpawned.add(bd.min);
       spawnBoss(bd);
-      showBanner('👑 ' + bd.name + ' 등장!', '#ffd23f');
+      showBanner('👑 ' + bd.name + ' 등장!', '#ff3b3b');
       SFX.play('boss');
-      shakeCam(14);
+      shakeCam(9);
+      zoomPunchCam(0.045);
     }
   }
 }
@@ -253,14 +255,17 @@ function updateEnemies(dt) {
     // 너무 멀면 제거 (리스폰됨)
     if (dist2(e.x, e.y, p.x, p.y) > 2600 * 2600) { G.enemies.splice(i, 1); continue; }
 
-    e.flash = Math.max(0, e.flash - dt * 8);
-    e.hitCd = Math.max(0, e.hitCd - dt);
-    e.slow = Math.max(0, e.slow - dt);
-    e.stun = Math.max(0, e.stun - dt);
-    e.wobble += dt * 6;
+  // 스폰 포탈 연출 중엔 느리게, 무례하게 등장하지 않음
+  e.spawnT = Math.max(0, e.spawnT - dt);
 
-    let sp = e.spd * (e.slow > 0 ? 0.55 : 1) * MapGen.groundSpeed(e.x, e.y);
-    if (G.rage.active) sp *= 0.45; // 도파민 러시 중엔 적이 느려짐
+  e.flash = Math.max(0, e.flash - dt * 8);
+  e.hitCd = Math.max(0, e.hitCd - dt);
+  e.slow = Math.max(0, e.slow - dt);
+  e.stun = Math.max(0, e.stun - dt);
+  e.wobble += dt * 6;
+
+  let sp = e.spd * (e.slow > 0 ? 0.55 : 1) * MapGen.groundSpeed(e.x, e.y) * (e.spawnT > 0 ? 0.25 : 1);
+  if (G.rage.active) sp *= 0.45; // 도파민 러시 중엔 적이 느려짐
 
     if (e.stun > 0) { e.vx = 0; e.vy = 0; }
     else {
@@ -353,7 +358,7 @@ function updateEnemies(dt) {
     // 플레이어 접촉 피해
     const pd = dist2(e.x, e.y, p.x, p.y);
     if (pd < (e.r + p.r) * (e.r + p.r) && p.iFrames <= 0) {
-      hurtPlayer(e.dmg);
+      hurtPlayer(e.dmg, e.x, e.y);
       p.iFrames = 0.7;
       // 넉백
       const d = Math.sqrt(pd) || 1;
@@ -371,9 +376,11 @@ function damageEnemy(e, dmg, canCrit = true, knockAng = null) {
   e.hp -= dmg;
   e.flash = 1;
   spawnDmgText(e.x + rand(-8, 8), e.y - e.r - 4, Math.round(dmg), crit);
-  SFX.play(crit ? 'crit' : 'hit');
+  SFX.play(crit ? 'crit' : 'hit', e.x);
+  // 피격 스파크
+  sparkBurst(e.x, e.y - e.r * 0.3, crit ? '#ffd76a' : e.color, crit ? 8 : 3, crit ? 420 : 300);
   if (knockAng !== null && !e.boss) {
-    e.x += Math.cos(knockAng) * 6; e.y += Math.sin(knockAng) * 6;
+    e.x += Math.cos(knockAng) * 7; e.y += Math.sin(knockAng) * 7;
   }
   if (e.hp <= 0) killEnemy(e);
 }
@@ -398,19 +405,28 @@ function killEnemy(e) {
 
   G.stats.kills++;
   addCombo();
-  SFX.play('kill');
-  shakeCam(e.boss ? 20 : (e.elite ? 5 : 1.4));
+  SFX.play('kill', e.x);
   if (e.elite) G.hitStop = Math.max(G.hitStop, 0.07); // 엘리트 킬 펀치
 
-  // 파티클 폭발
-  const n = e.boss ? 60 : (e.elite ? 26 : 12);
-  for (let i = 0; i < n; i++) {
-    const a = Math.random() * TAU, s = rand(60, e.boss ? 420 : 240);
+  // 시네마틱 사망: 파편 파열 + 영혼 잔상 + 충격파
+  shardBurst(e.x, e.y, darken(e.color, 0.75), e.boss ? 42 : (e.elite ? 22 : 9), e.boss ? 460 : 300, e.boss ? 9 : 6);
+  shardBurst(e.x, e.y, '#1a1e2e', e.boss ? 20 : 8, 200, 5);
+  // 영혼 잔상 (위로 떠오르는 연기)
+  const wisps = e.boss ? 7 : (e.elite ? 4 : 2);
+  for (let i = 0; i < wisps; i++) {
     G.particles.push({
-      x: e.x, y: e.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
-      life: rand(0.3, 0.8), maxLife: 0.8, size: rand(2, e.boss ? 9 : 5),
-      color: e.color, grav: 260,
+      x: e.x + rand(-e.r / 2, e.r / 2), y: e.y + rand(-e.r / 2, 0),
+      vx: rand(-16, 16), vy: rand(-90, -40),
+      life: rand(0.6, 1.1), maxLife: 1.1, size: rand(5, e.boss ? 16 : 9),
+      color: darken(e.color, 0.4), grav: -30, shape: 'wisp',
     });
+  }
+  // 발광 플래시
+  G.particles.push({ x: e.x, y: e.y, vx: 0, vy: 0, life: 0.18, maxLife: 0.18, size: e.r * (e.boss ? 3.4 : 2.2), color: e.color, grav: 0, shape: 'glow' });
+  // 충격파 링
+  if (e.elite || e.boss) {
+    G.explosions.push({ x: e.x, y: e.y, r: e.r * (e.boss ? 5 : 3), life: 0.35, maxLife: 0.35, color: e.color, thin: true });
+    if (e.boss) { zoomPunchCam(0.05); } else { zoomPunchCam(0.018); }
   }
 
   // 젬 드롭
@@ -466,48 +482,92 @@ function updateEProjectiles(dt) {
     b.x += b.vx * dt; b.y += b.vy * dt;
     if (b.life <= 0) { G.eProjectiles.splice(i, 1); continue; }
     if (dist2(b.x, b.y, p.x, p.y) < (b.r + p.r) * (b.r + p.r)) {
-      if (p.iFrames <= 0) { hurtPlayer(b.dmg); p.iFrames = 0.4; }
+      if (p.iFrames <= 0) { hurtPlayer(b.dmg, b.x, b.y); p.iFrames = 0.4; }
       G.eProjectiles.splice(i, 1);
     }
   }
 }
 
-/* 적 그리기 (에셋 없이 캔버스 도형 + 귀여운 눈) */
-function drawEyes(ctx, x, y, r, dirX, sleepy) {
-  const ex = clamp(dirX * 0.25, -0.4, 0.4) * r;
-  ctx.fillStyle = '#fff';
-  ctx.beginPath();
-  ctx.arc(x - r * 0.32 + ex, y - r * 0.12, r * 0.24, 0, TAU);
-  ctx.arc(x + r * 0.32 + ex, y - r * 0.12, r * 0.24, 0, TAU);
-  ctx.fill();
-  ctx.fillStyle = '#1a1a2e';
-  ctx.beginPath();
-  ctx.arc(x - r * 0.32 + ex * 1.4, y - r * 0.1, r * 0.11, 0, TAU);
-  ctx.arc(x + r * 0.32 + ex * 1.4, y - r * 0.1, r * 0.11, 0, TAU);
-  ctx.fill();
+/* 색 보정 유틸 */
+function darken(hex, f) {
+  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  return `rgb(${(r * f) | 0},${(g * f) | 0},${(b * f) | 0})`;
+}
+
+/* 위협적인 빛나는 사안 (귀여운 눈 대체) */
+function drawMenaceEyes(ctx, x, y, r, glowColor, dirX) {
+  const ex = clamp(dirX * 0.2, -0.35, 0.35) * r;
+  const eyeW = r * 0.3, eyeH = r * 0.1;
+  // 발광
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  Glow.draw(ctx, glowColor, x - r * 0.34 + ex, y - r * 0.1, r * 0.32, 0.5);
+  Glow.draw(ctx, glowColor, x + r * 0.34 + ex, y - r * 0.1, r * 0.32, 0.5);
+  ctx.restore();
+  // 사선 눈매
+  ctx.fillStyle = glowColor;
+  ctx.save();
+  ctx.translate(x - r * 0.34 + ex, y - r * 0.1); ctx.rotate(0.28);
+  ctx.fillRect(-eyeW / 2, -eyeH / 2, eyeW, eyeH);
+  ctx.restore();
+  ctx.save();
+  ctx.translate(x + r * 0.34 + ex, y - r * 0.1); ctx.rotate(-0.28);
+  ctx.fillRect(-eyeW / 2, -eyeH / 2, eyeW, eyeH);
+  ctx.restore();
 }
 
 function drawEnemy(ctx, e) {
   const p = G.player;
   const dx = p.x - e.x;
   const squash = 1 + Math.sin(e.wobble) * 0.06;
+  const spawning = e.spawnT > 0;
+  const spawnScale = spawning ? 1 - e.spawnT * 1.6 : 1;
+  const bodyCol = e.flash > 0.4 ? '#e8ecf4' : darken(e.color, e.boss ? 0.62 : 0.5);
+  const glowCol = e.color;
+
   ctx.save();
   ctx.translate(e.x, e.y);
 
+  // 스폰 포탈: 어둠에서 솟아오르는 연출
+  if (spawning) {
+    const t = 1 - e.spawnT / 0.5; // 0→1
+    ctx.globalAlpha = 0.7;
+    ctx.strokeStyle = glowCol;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.ellipse(0, e.r * 0.7, e.r * (1.7 - t * 0.7), e.r * (0.55 - t * 0.2), 0, 0, TAU); ctx.stroke();
+    ctx.globalCompositeOperation = 'lighter';
+    Glow.draw(ctx, glowCol, 0, e.r * 0.5, e.r * 1.5 * (1 - t * 0.4), 0.35 * (1 - t));
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.scale(spawnScale, spawnScale);
+  }
+
   // 그림자
-  ctx.fillStyle = 'rgba(0,0,0,0.25)';
-  ctx.beginPath(); ctx.ellipse(0, e.r * 0.8, e.r * 0.85, e.r * 0.32, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.38)';
+  ctx.beginPath(); ctx.ellipse(0, e.r * 0.8, e.r * 0.85, e.r * 0.3, 0, 0, TAU); ctx.fill();
 
   // 엘리트/보스 오라
   if (e.elite || e.boss) {
-    ctx.strokeStyle = e.boss ? 'rgba(255,45,149,0.8)' : 'rgba(255,210,63,0.85)';
-    ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.arc(0, 0, e.r + 7 + Math.sin(e.wobble * 1.4) * 2, 0, TAU); ctx.stroke();
+    ctx.globalCompositeOperation = 'lighter';
+    Glow.draw(ctx, e.boss ? '#ff2d4e' : '#ffaa2d', 0, 0, e.r * 2.1, 0.4 + Math.sin(e.wobble * 1.4) * 0.12);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.strokeStyle = e.boss ? 'rgba(255,45,78,0.75)' : 'rgba(255,170,45,0.8)';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.arc(0, 0, e.r + 6 + Math.sin(e.wobble * 1.4) * 2, 0, TAU); ctx.stroke();
+  } else {
+    // 일반 적 은은한 발광
+    ctx.globalCompositeOperation = 'lighter';
+    Glow.draw(ctx, glowCol, 0, 0, e.r * 1.7, 0.16);
+    ctx.globalCompositeOperation = 'source-over';
   }
 
   ctx.scale(1 / squash, squash);
   const r = e.r;
-  const body = e.flash > 0.4 ? '#ffffff' : e.color;
+  const body = bodyCol;
+
+  // 몸통 림 스트로크
+  ctx.strokeStyle = glowCol;
+  ctx.lineWidth = e.boss ? 3 : 1.8;
 
   switch (e.type) {
     case 'slime': case 'islime': case 'slimeking': {
@@ -521,7 +581,7 @@ function drawEnemy(ctx, e) {
       // 하이라이트
       ctx.fillStyle = 'rgba(255,255,255,0.35)';
       ctx.beginPath(); ctx.ellipse(-r * 0.35, -r * 0.45, r * 0.25, r * 0.15, -0.5, 0, TAU); ctx.fill();
-      drawEyes(ctx, 0, -r * 0.1, r, dx, false);
+      drawMenaceEyes(ctx, 0, -r * 0.1, r, glowCol, dx);
       // 왕관
       if (e.boss) drawCrown(ctx, 0, -r * 1.1, r * 0.5);
       break;
@@ -533,7 +593,7 @@ function drawEnemy(ctx, e) {
       ctx.beginPath(); ctx.arc(0, -r * 0.3, r * 0.95, Math.PI, 0); ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#fff';
       ctx.beginPath(); ctx.arc(-r * 0.35, -r * 0.55, r * 0.18, 0, TAU); ctx.arc(r * 0.3, -r * 0.5, r * 0.14, 0, TAU); ctx.fill();
-      drawEyes(ctx, 0, r * 0.15, r, dx, true);
+      drawMenaceEyes(ctx, 0, r * 0.15, r, glowCol, dx);
       break;
     }
     case 'bat': case 'wisp': {
@@ -545,7 +605,7 @@ function drawEnemy(ctx, e) {
       ctx.moveTo(r * 0.4, 0); ctx.lineTo(r * 1.7, -flap * r * 0.8 - r * 0.2); ctx.lineTo(r * 0.5, r * 0.4);
       ctx.fill();
       ctx.beginPath(); ctx.arc(0, 0, r * 0.75, 0, TAU); ctx.fill();
-      drawEyes(ctx, 0, 0, r * 0.75, dx, false);
+      drawMenaceEyes(ctx, 0, 0, r * 0.75, glowCol, dx);
       break;
     }
     case 'scorpion': case 'scorpking': {
@@ -561,7 +621,7 @@ function drawEnemy(ctx, e) {
       // 집게
       ctx.fillStyle = body;
       ctx.beginPath(); ctx.arc(r * 0.95, -r * 0.3, r * 0.28, 0, TAU); ctx.arc(r * 0.95, r * 0.3, r * 0.28, 0, TAU); ctx.fill();
-      drawEyes(ctx, r * 0.2, 0, r * 0.7, dx, false);
+      drawMenaceEyes(ctx, r * 0.2, 0, r * 0.7, glowCol, dx);
       if (e.boss) drawCrown(ctx, 0, -r * 0.6, r * 0.45);
       break;
     }
@@ -574,7 +634,7 @@ function drawEnemy(ctx, e) {
       ctx.moveTo(-r * 0.55, r * 0.2); ctx.lineTo(r * 0.55, r * 0.05);
       ctx.moveTo(-r * 0.55, r * 0.65); ctx.lineTo(r * 0.55, r * 0.5);
       ctx.stroke();
-      drawEyes(ctx, 0, -r * 0.45, r * 0.85, dx, false);
+      drawMenaceEyes(ctx, 0, -r * 0.45, r * 0.85, glowCol, dx);
       break;
     }
     case 'wolf': {
@@ -588,7 +648,7 @@ function drawEnemy(ctx, e) {
       ctx.fill();
       // 꼬리
       ctx.beginPath(); ctx.ellipse(-r * 0.95, -r * 0.25, r * 0.4, r * 0.18, -0.5, 0, TAU); ctx.fill();
-      drawEyes(ctx, r * 0.7, -r * 0.2, r * 0.45, dx, false);
+      drawMenaceEyes(ctx, r * 0.7, -r * 0.2, r * 0.45, glowCol, dx);
       break;
     }
     case 'imp': case 'dopdemon': {
@@ -602,7 +662,7 @@ function drawEnemy(ctx, e) {
       // 입
       ctx.strokeStyle = '#2a0a10'; ctx.lineWidth = r * 0.1;
       ctx.beginPath(); ctx.arc(0, r * 0.25, r * 0.3, 0.2, Math.PI - 0.2); ctx.stroke();
-      drawEyes(ctx, 0, -r * 0.15, r * 0.8, dx, false);
+      drawMenaceEyes(ctx, 0, -r * 0.15, r * 0.8, glowCol, dx);
       if (e.boss) drawCrown(ctx, 0, -r * 0.9, r * 0.5);
       break;
     }
@@ -614,7 +674,7 @@ function drawEnemy(ctx, e) {
       // 얼굴 패치
       ctx.fillStyle = '#bcd8f0';
       MapGen.rr(ctx, -r * 0.4, -r * 0.5, r * 0.8, r * 0.6, r * 0.25); ctx.fill();
-      drawEyes(ctx, 0, -r * 0.3, r * 0.6, dx, false);
+      drawMenaceEyes(ctx, 0, -r * 0.3, r * 0.6, glowCol, dx);
       if (e.boss) drawCrown(ctx, 0, -r * 0.8, r * 0.55);
       break;
     }
@@ -626,7 +686,7 @@ function drawEnemy(ctx, e) {
       // 균열 + 용암 발광
       ctx.strokeStyle = '#ffb020'; ctx.lineWidth = r * 0.1;
       ctx.beginPath(); ctx.moveTo(-r * 0.6, r * 0.3); ctx.lineTo(-r * 0.1, -r * 0.05); ctx.lineTo(r * 0.4, r * 0.35); ctx.stroke();
-      drawEyes(ctx, 0, -r * 0.15, r * 0.75, dx, false);
+      drawMenaceEyes(ctx, 0, -r * 0.15, r * 0.75, glowCol, dx);
       break;
     }
     case 'cguard': {
@@ -637,7 +697,7 @@ function drawEnemy(ctx, e) {
       ctx.moveTo(0, -r); ctx.lineTo(r * 0.8, -r * 0.2); ctx.lineTo(r * 0.55, r * 0.85);
       ctx.lineTo(-r * 0.55, r * 0.85); ctx.lineTo(-r * 0.8, -r * 0.2);
       ctx.closePath(); ctx.fill();
-      drawEyes(ctx, 0, 0, r * 0.8, dx, false);
+      drawMenaceEyes(ctx, 0, 0, r * 0.8, glowCol, dx);
       break;
     }
     case 'charger': {
@@ -667,7 +727,7 @@ function drawEnemy(ctx, e) {
         ctx.moveTo(r * 0.5, -r * 0.6); ctx.lineTo(r * 0.9, -r * 1.25); ctx.lineTo(r * 0.15, -r * 0.8);
         ctx.fill();
       }
-      drawEyes(ctx, 0, -r * 0.15, r * 0.85, dx, false);
+      drawMenaceEyes(ctx, 0, -r * 0.15, r * 0.85, glowCol, dx);
       break;
     }
     case 'spitter': {
@@ -684,7 +744,7 @@ function drawEnemy(ctx, e) {
       // 잎
       ctx.fillStyle = '#4f9e3a';
       ctx.beginPath(); ctx.ellipse(-r * 0.75, -r * 0.9, r * 0.3, r * 0.14, -0.7, 0, TAU); ctx.fill();
-      drawEyes(ctx, 0, -r * 0.55, r * 0.78, dx, false);
+      drawMenaceEyes(ctx, 0, -r * 0.55, r * 0.78, glowCol, dx);
       break;
     }
     case 'splitter': case 'splitling': {
@@ -699,13 +759,13 @@ function drawEnemy(ctx, e) {
       ctx.fill();
       ctx.strokeStyle = 'rgba(20,80,50,0.55)'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(0, -r * 0.95); ctx.lineTo(0, r * 0.7); ctx.stroke();
-      drawEyes(ctx, 0, -r * 0.1, r, dx, false);
+      drawMenaceEyes(ctx, 0, -r * 0.1, r, glowCol, dx);
       break;
     }
     default: {
       ctx.fillStyle = body;
       ctx.beginPath(); ctx.arc(0, 0, r * 0.85, 0, TAU); ctx.fill();
-      drawEyes(ctx, 0, 0, r * 0.85, dx, false);
+      drawMenaceEyes(ctx, 0, 0, r * 0.85, glowCol, dx);
     }
   }
   ctx.restore();
@@ -721,7 +781,7 @@ function drawEnemy(ctx, e) {
 }
 
 function drawCrown(ctx, x, y, s) {
-  ctx.fillStyle = '#ffd23f';
+  ctx.fillStyle = '#6e5a20';
   ctx.beginPath();
   ctx.moveTo(x - s, y);
   ctx.lineTo(x - s, y - s * 0.9);
@@ -732,7 +792,8 @@ function drawCrown(ctx, x, y, s) {
   ctx.lineTo(x + s, y);
   ctx.closePath();
   ctx.fill();
-  ctx.fillStyle = '#ff5d8f';
+  ctx.strokeStyle = '#b3923a'; ctx.lineWidth = 1.2; ctx.stroke();
+  ctx.fillStyle = '#ff3b3b';
   ctx.beginPath(); ctx.arc(x, y - s * 0.45, s * 0.14, 0, TAU); ctx.fill();
 }
 
@@ -761,8 +822,8 @@ function shatterCrystal(c) {
   const idx = G.crystals.indexOf(c);
   if (idx < 0) return;
   G.crystals.splice(idx, 1);
-  SFX.play('crystal');
-  shakeCam(7);
+  SFX.play('crystal', c.x);
+  kickCam(c.x - G.player.x, c.y - G.player.y, 5);
   showBanner('💠 도파민 결정 파괴!', `hsl(${c.hue},100%,70%)`);
 
   // 젬 분수!
@@ -781,15 +842,11 @@ function shatterCrystal(c) {
   if (Math.random() < 0.06) {
     G.pickups.push({ kind: 'chest', x: c.x, y: c.y - 10, val: 3, t: 0, vx: 0, vy: 0 });
   }
-  // 유리 파편 파티클
-  for (let i = 0; i < 42; i++) {
-    const a = Math.random() * TAU, s = rand(80, 420);
-    G.particles.push({
-      x: c.x, y: c.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 80,
-      life: rand(0.4, 0.9), maxLife: 0.9, size: rand(2, 6),
-      color: `hsl(${c.hue + rand(-30, 30)},100%,${rand(55, 80)}%)`, grav: 380,
-    });
-  }
+  // 유리 파편 + 발광 파열
+  shardBurst(c.x, c.y, `hsl(${c.hue},80%,55%)`, 34, 430, 7);
+  shardBurst(c.x, c.y, `hsl(${c.hue},60%,30%)`, 16, 260, 6);
+  G.particles.push({ x: c.x, y: c.y, vx: 0, vy: 0, life: 0.22, maxLife: 0.22, size: 64, color: `hsl(${c.hue},100%,70%)`, grav: 0, shape: 'glow' });
+  G.explosions.push({ x: c.x, y: c.y, r: 90, life: 0.32, maxLife: 0.32, color: `hsl(${c.hue},100%,65%)`, thin: true });
 }
 
 function updateCrystals(dt) {

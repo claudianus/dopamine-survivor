@@ -293,8 +293,9 @@ function fireWeapon(id, lv, dmgM) {
 /* 번개 1회 낙하 (+진화 시 연쇄) */
 function strikeLightning(x, y, lv, dmgM, chained) {
   G.fx.bolts.push({ x, y, life: 0.28, maxLife: 0.28 });
-  SFX.play('thunder');
-  shakeCam(2.5);
+  SFX.play('thunder', x);
+  kickCam(x - G.player.x, y - G.player.y, 3);
+  sparkBurst(x, y, '#fff3b0', 8, 380);
   let hitSomething = false;
   for (const e of queryEnemies(x, y, lv.aoe)) {
     damageEnemy(e, lv.dmg * dmgM, true, null);
@@ -364,11 +365,11 @@ function updateProjectiles(dt) {
         G.projectiles.splice(i, 1);
         // 진화: 착탄 폭발
         if (b.explode && dead) {
-          G.explosions.push({ x: b.x, y: b.y, r: b.explode, life: 0.3, maxLife: 0.3 });
+          G.explosions.push({ x: b.x, y: b.y, r: b.explode * 1.4, life: 0.3, maxLife: 0.3, color: '#a5f3ff' });
           for (const e of queryEnemies(b.x, b.y, b.explode)) damageEnemy(e, b.dmg * 0.6, true, null);
           for (const c of queryCrystals(b.x, b.y, b.explode)) damageCrystal(c, b.dmg * 0.6);
-          SFX.play('boom');
-          shakeCam(2);
+          SFX.play('boom', b.x);
+          sparkBurst(b.x, b.y, '#a5f3ff', 10, 420);
         }
         for (let k = 0; k < 4; k++) {
           const a = Math.random() * TAU;
@@ -425,9 +426,15 @@ function updateProjectiles(dt) {
       if (t >= 1) {
         // 폭발!
         G.projectiles.splice(i, 1);
-        SFX.play('boom');
-        shakeCam(7);
-        G.explosions.push({ x: b.x, y: b.y, r: b.aoe, life: 0.4, maxLife: 0.4 });
+        SFX.play('boom', b.x);
+        kickCam(b.x - p.x, b.y - p.y, 4);
+        zoomPunchCam(0.015);
+        shakeCam(3);
+        G.explosions.push({ x: b.x, y: b.y, r: b.aoe * 1.4, life: 0.4, maxLife: 0.4, color: '#ff9a3d' });
+        // 연기 기둥
+        for (let k = 0; k < 5; k++) {
+          G.particles.push({ x: b.x + rand(-14, 14), y: b.y, vx: rand(-20, 20), vy: rand(-70, -30), life: rand(0.5, 0.9), maxLife: 0.9, size: rand(8, 14), color: '#2a2d36', grav: -20, shape: 'wisp' });
+        }
         for (const e of queryEnemies(b.x, b.y, b.aoe)) {
           damageEnemy(e, b.dmg, true, null);
         }
@@ -491,101 +498,147 @@ function drawProjectiles(ctx) {
     const pulse = 1 + (G.auraPulse || 0) * 0.06;
     const r = lv.r * pulse;
     const hue = (G.time * 140) % 360;
-    const grad = ctx.createRadialGradient(p.x, p.y, r * 0.55, p.x, p.y, r);
-    const col = evolved ? `hsla(${hue},100%,65%,` : 'rgba(255,93,143,';
-    grad.addColorStop(0, col + '0)');
-    grad.addColorStop(0.75, col + `${0.10 + (G.auraPulse || 0) * 0.12})`);
-    grad.addColorStop(1, col + `${0.26 + (G.auraPulse || 0) * 0.2})`);
-    ctx.fillStyle = grad;
-    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, TAU); ctx.fill();
-    ctx.strokeStyle = col + `${0.45 + (G.auraPulse || 0) * 0.4})`;
+    const col = evolved ? `hsla(${hue},100%,65%,` : 'rgba(77,227,255,';
+    // 내부 발광
+    ctx.globalCompositeOperation = 'lighter';
+    Glow.draw(ctx, evolved ? `hsl(${hue},100%,60%)` : '#4de3ff', p.x, p.y, r * 1.05, 0.10 + (G.auraPulse || 0) * 0.1);
+    ctx.globalCompositeOperation = 'source-over';
+    // 회전하는 이중 링
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(G.time * 0.8);
+    ctx.strokeStyle = col + `${0.5 + (G.auraPulse || 0) * 0.3})`;
     ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, TAU); ctx.stroke();
+    ctx.setLineDash([26, 18]);
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.stroke();
+    ctx.rotate(-G.time * 2.1);
+    ctx.setLineDash([10, 26]);
+    ctx.strokeStyle = col + `${0.3 + (G.auraPulse || 0) * 0.3})`;
+    ctx.beginPath(); ctx.arc(0, 0, r * 0.88, 0, TAU); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
   }
 
   // 궤도 검
   if (G.weapons.orbit) {
     const lv = wstats('orbit', G.weapons.orbit);
     const evolved = G.weapons.orbit.evolved;
+    // 애프터이미지 궤적 (기록 → 페이드 렌더)
+    if (!G.orbitTrail) G.orbitTrail = [];
+    G.orbitTrail.push({ a: G.orbitAngle * lv.spd / 3, t: 0.22, count: lv.count, r: lv.r });
+    if (G.orbitTrail.length > 10) G.orbitTrail.shift();
+    for (const tr of G.orbitTrail) {
+      tr.t -= 1 / 60;
+      if (tr.t <= 0 || tr.r === lv.r - 0) { /* keep */ }
+      const fade = Math.max(0, tr.t / 0.22) * 0.25;
+      if (fade <= 0.01) continue;
+      ctx.strokeStyle = evolved ? `rgba(255,210,63,${fade})` : `rgba(140,220,255,${fade})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, lv.r, tr.a - 0.5, tr.a + 0.1);
+      ctx.stroke();
+    }
     for (let i = 0; i < lv.count; i++) {
       const a = G.orbitAngle * lv.spd / 3 + (i / lv.count) * TAU;
       const ox = p.x + Math.cos(a) * lv.r, oy = p.y + Math.sin(a) * lv.r;
+      // 검 발광
+      ctx.globalCompositeOperation = 'lighter';
+      Glow.draw(ctx, evolved ? '#ffd23f' : '#7ad0ff', ox, oy, 26, 0.5);
+      ctx.globalCompositeOperation = 'source-over';
       ctx.save();
       ctx.translate(ox, oy);
       ctx.rotate(a + Math.PI / 2 + Math.sin(G.orbitAngle * 3) * 0.3);
       if (evolved) {
-        // 황금 검 + 불꽃 잔상
-        ctx.shadowColor = '#ffd23f'; ctx.shadowBlur = 12;
         ctx.fillStyle = '#ffd23f';
         ctx.beginPath();
         ctx.moveTo(0, -20); ctx.lineTo(5.5, -4); ctx.lineTo(3.5, 16); ctx.lineTo(-3.5, 16); ctx.lineTo(-5.5, -4);
         ctx.closePath(); ctx.fill();
-        ctx.shadowBlur = 0;
         ctx.fillStyle = '#fff3c4';
         ctx.fillRect(-8, 14, 16, 4.5);
       } else {
-        ctx.fillStyle = '#e8eef5';
+        ctx.fillStyle = '#b8c4d4';
         ctx.beginPath();
         ctx.moveTo(0, -18); ctx.lineTo(4.5, -4); ctx.lineTo(3, 14); ctx.lineTo(-3, 14); ctx.lineTo(-4.5, -4);
         ctx.closePath(); ctx.fill();
-        ctx.fillStyle = '#ffd23f';
+        ctx.fillStyle = '#7ad0ff';
         ctx.fillRect(-7, 12, 14, 4);
       }
       ctx.restore();
     }
   }
 
-  // 번개
+  // 번개 (시네마틱 다중 분기)
   for (const b of G.fx.bolts) {
     const a = b.life / b.maxLife;
-    ctx.strokeStyle = `rgba(255,225,77,${a})`;
-    ctx.lineWidth = 4 * a + 1;
-    ctx.beginPath();
-    let x = b.x, y = b.y - 260;
-    ctx.moveTo(x, y);
-    while (y < b.y - 8) {
-      y += 26;
-      x = b.x + rand(-16, 16);
+    ctx.globalCompositeOperation = 'lighter';
+    Glow.draw(ctx, '#ffe14d', b.x, b.y, 70 * (1.5 - a), a * 0.75);
+    const drawBoltPath = (x, y, jag, width, color) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      let cx = x, cy = y - 300;
+      ctx.moveTo(cx, cy);
+      while (cy < y - 10) {
+        cy += 30;
+        cx = x + rand(-jag, jag);
+        ctx.lineTo(cx, cy);
+      }
       ctx.lineTo(x, y);
+      ctx.stroke();
+    };
+    // 외곽 할로 → 코어
+    drawBoltPath(b.x, b.y, 20, 6 * a + 2, `rgba(255,225,77,${a * 0.5})`);
+    drawBoltPath(b.x, b.y, 12, 2.5 * a + 0.8, `rgba(255,255,255,${a})`);
+    // 분기
+    if (a > 0.4) {
+      drawBoltPath(b.x + rand(-26, 26), b.y - rand(30, 80), 16, 1.5, `rgba(255,225,77,${a * 0.4})`);
     }
-    ctx.lineTo(b.x, b.y);
-    ctx.stroke();
-    ctx.fillStyle = `rgba(255,225,77,${a * 0.4})`;
-    ctx.beginPath(); ctx.arc(b.x, b.y, 26 * (1.3 - a), 0, TAU); ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
   }
 
-  // 폭발
+  // 폭발 / 충격파 (시네마틱 링 + 발광)
   for (const ex of G.explosions) {
     const t = 1 - ex.life / ex.maxLife;
-    const r = ex.r * (0.4 + t * 0.8);
-    ctx.strokeStyle = `rgba(255,140,50,${1 - t})`;
-    ctx.lineWidth = 8 * (1 - t) + 2;
+    const r = ex.r * (0.35 + t * 0.85);
+    const col = ex.color || '#ff8c32';
+    ctx.globalCompositeOperation = 'lighter';
+    // 확장 링
+    ctx.strokeStyle = col;
+    ctx.globalAlpha = (1 - t) * 0.9;
+    ctx.lineWidth = ex.thin ? 3 * (1 - t) + 1 : 7 * (1 - t) + 2;
     ctx.beginPath(); ctx.arc(ex.x, ex.y, r, 0, TAU); ctx.stroke();
-    const grad = ctx.createRadialGradient(ex.x, ex.y, 0, ex.x, ex.y, r);
-    grad.addColorStop(0, `rgba(255,220,80,${0.7 * (1 - t)})`);
-    grad.addColorStop(1, 'rgba(255,80,30,0)');
-    ctx.fillStyle = grad;
-    ctx.beginPath(); ctx.arc(ex.x, ex.y, r, 0, TAU); ctx.fill();
+    // 잔상 링 (더 얇게, 살짝 뒤따름)
+    ctx.globalAlpha = (1 - t) * 0.4;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(ex.x, ex.y, r * 0.78, 0, TAU); ctx.stroke();
+    // 발광 코어
+    if (!ex.thin) {
+      Glow.draw(ctx, col, ex.x, ex.y, r * 0.9, (1 - t) * 0.8);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
   }
 
   for (const b of G.projectiles) {
     if (b.kind === 'bolt') {
-      // 진화 볼트는 무지개색
-      const boltCol = b.pierce ? `hsl(${(G.time * 400 + b.x) % 360},100%,65%)` : b.color;
-      // 잔상
-      for (let i = 0; i < b.trail.length; i++) {
-        const t = b.trail[i];
-        ctx.globalAlpha = (i / b.trail.length) * 0.4;
-        ctx.fillStyle = boltCol;
-        ctx.beginPath(); ctx.arc(t.x, t.y, b.r * 0.6, 0, TAU); ctx.fill();
-      }
-      ctx.globalAlpha = 1;
-      const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r + 7);
-      grad.addColorStop(0, '#ffffff');
-      grad.addColorStop(0.4, boltCol);
-      grad.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = grad;
-      ctx.beginPath(); ctx.arc(b.x, b.y, b.r + 7, 0, TAU); ctx.fill();
+      // 혜성형 마탄: 발광 꼬리 + 코어
+      const boltCol = b.pierce ? `hsl(${(G.time * 400 + b.x) % 360},100%,65%)` : '#4de3ff';
+      ctx.globalCompositeOperation = 'lighter';
+      // 꼬리 (진행 반대 방향 라인)
+      const tx = b.x - b.vx * 0.045, ty = b.y - b.vy * 0.045;
+      const tg = ctx.createLinearGradient(b.x, b.y, tx, ty);
+      tg.addColorStop(0, boltCol);
+      tg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.strokeStyle = tg;
+      ctx.lineWidth = b.r * 0.9;
+      ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(tx, ty); ctx.stroke();
+      // 발광
+      Glow.draw(ctx, boltCol, b.x, b.y, b.r * 3.2, 0.75);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.5, 0, TAU); ctx.fill();
     }
     else if (b.kind === 'boomerang') {
       ctx.save();
