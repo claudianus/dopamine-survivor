@@ -71,6 +71,8 @@ const POST = {
   },
 
   render(dt, camL, camT, zoom) {
+    // 자체 소프트 스퀴즈 톤맵: 이번 프레임 하이라이트 압축 플래그
+    this._needTonemap = true;
     const W = G.view.w, H = G.view.h;
     outCtx.setTransform(G.dpr, 0, 0, G.dpr, 0, 0);
 
@@ -98,55 +100,7 @@ const POST = {
       outCtx.drawImage(sceneCanvas, 0, 0, W, H);
     }
 
-    /* ===== Khronos PBR Neutral 톤맵핑 합성 (WebGL) =====
-     * 브라이트패스(픽셀 순회)만 남기고, 블룸 합성은 WebGL에서
-     * 클램핑 없는 HDR 가산 + 톤맵 롤오프로 수행한다.
-     * → 후반부 무기 과다노출 붕괴 근본 해결 */
-    if (this.filterOK && TONEMAP.enabled) {
-      const bw = this.bloomA.width, bh = this.bloomA.height;
-      const b1 = this.bloomA.getContext('2d');
-      b1.setTransform(1, 0, 0, 1, 0, 0);
-      b1.clearRect(0, 0, bw, bh);
-      // 게임이 멈춘 상태(레벨업/상자/일시정지)에선 브라이트패스 갱신 스킵
-      if (G.state === 'playing') {
-        const now2 = performance.now();
-        if (now2 - (this._bpCacheT || 0) > 200) {
-          this._bpCacheT = now2;
-          const tcv = this._bpTmp || (this._bpTmp = document.createElement('canvas'));
-          tcv.width = bw; tcv.height = bh;
-          const tc = tcv.getContext('2d', { willReadFrequently: true });
-          tc.clearRect(0, 0, bw, bh);
-          tc.drawImage(sceneCanvas, 0, 0, bw, bh);
-          let img;
-          try { img = tc.getImageData(0, 0, bw, bh); } catch (e) { img = null; }
-          if (img) {
-            const d = img.data;
-            const THR = 184;
-            for (let i = 0; i < d.length; i += 4) {
-              const l = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
-              if (l < THR) { d[i] = d[i + 1] = d[i + 2] = 0; d[i + 3] = 0; }
-              else {
-                const k = (l - THR) / (255 - THR);
-                d[i] *= k; d[i + 1] *= k; d[i + 2] *= k; d[i + 3] = 255;
-              }
-            }
-            tc.putImageData(img, 0, 0);
-          }
-          // 브라이트패스 → 블룸 버퍼 (블러)
-          const b2 = this.bloomB.getContext('2d');
-          b2.setTransform(1, 0, 0, 1, 0, 0);
-          b2.clearRect(0, 0, bw, bh);
-          b2.filter = 'blur(6px) saturate(0.5)';
-          b2.drawImage(tcv, 0, 0);
-          b2.filter = 'none';
-        }
-      }
-      // WebGL HDR 합성 + Khronos PBR Neutral 톤맵 → 화면
-      const rushGain = (G.rage && G.rage.active) ? 1.15 : 0.85;
-      TONEMAP.composite(outCtx, sceneCanvas, this.bloomB, rushGain, 1.02);
-
-      // 톤맵된 화면 위의 나머지 효과는 2D로 계속 (색수차/러시/그레이드)
-    } else if (this.filterOK) {
+    if (this.filterOK) {
       const bw = this.bloomA.width, bh = this.bloomA.height;
       const b1 = this.bloomA.getContext('2d');
       b1.setTransform(1, 0, 0, 1, 0, 0);
@@ -319,6 +273,44 @@ const POST = {
     }
     outCtx.globalAlpha = 1;
     outCtx.globalCompositeOperation = 'source-over';
+
+    /* ===== 자체 소프트 스퀴즈 톤매퍼 (2D) =====
+     * 후반부 이펙트 과다 시 하이라이트가 255 클램핑으로 하얗게 날아가는 것을
+     * 휘도 199 이상 영역만 지수 롤오프로 압축해 방지. 색상비(RGB ratio) 유지.
+     * 씬과 동일 sRGB 공간 — 외부 톤맵 커브의 미스매치/UV 뒤집힘 없음. */
+    if (this._needTonemap) {
+      this._needTonemap = false;
+      try {
+        const tw = Math.max(2, W >> 1), th = Math.max(2, H >> 1);
+        if (!this._tmCanvas) {
+          this._tmCanvas = document.createElement('canvas');
+          this._tmCtx = this._tmCanvas.getContext('2d', { willReadFrequently: true });
+        }
+        this._tmCanvas.width = tw; this._tmCanvas.height = th;
+        this._tmCtx.setTransform(1, 0, 0, 1, 0, 0);
+        this._tmCtx.clearRect(0, 0, tw, th);
+        this._tmCtx.drawImage(sceneCanvas, 0, 0, tw, th);
+        const img = this._tmCtx.getImageData(0, 0, tw, th);
+        const d = img.data;
+        const A = 199, B = 255;
+        for (let i = 0; i < d.length; i += 4) {
+          const l = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+          if (l <= A) continue;
+          const t = (l - A) / (B - A);
+          const sq = 1 - Math.exp(-2.2 * t);
+          const newL = A + sq * (B - A) * 0.965;
+          const k = newL / l;
+          d[i] = Math.min(255, d[i] * k + 2);
+          d[i + 1] = Math.min(255, d[i + 1] * k + 2);
+          d[i + 2] = Math.min(255, d[i + 2] * k + 2);
+        }
+        this._tmCtx.putImageData(img, 0, 0);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.clearRect(0, 0, sceneCanvas.width, sceneCanvas.height);
+        ctx.drawImage(this._tmCanvas, 0, 0, sceneCanvas.width, sceneCanvas.height);
+      } catch (e) {}
+    }
 
     /* 밤 틴트 (라이팅이 밤을 담당 — 미미하게만) */
     if (G.dayTint > 0.05) {
@@ -626,7 +618,6 @@ function resize() {
   G.vigGrad.addColorStop(1, 'rgba(0,0,0,0.26)');
   if (LIGHTS.canvas) LIGHTS.resize();
   POST.resize();
-  TONEMAP.resize();
 }
 window.addEventListener('resize', resize);
 
@@ -2066,7 +2057,6 @@ window.addEventListener('load', () => {
   resize();
   LIGHTS.init();
   POST.init();
-  TONEMAP.init();
   bindUI();
   G.state = 'title';
   requestAnimationFrame(loop);
