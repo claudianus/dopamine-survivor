@@ -1,0 +1,322 @@
+'use strict';
+/* ============================================================
+ * 도파민 서바이버 - 프로시듀럴 무한 맵 생성기
+ * 심플렉스 노이즈 3종(고도/습도/기온) → 바이옴 → 청크 캔버스 캐싱
+ * ============================================================ */
+
+const TILE = 64;          // 타일 크기(px)
+const CHUNK = 8;          // 청크 = 8x8 타일
+const CHUNK_PX = TILE * CHUNK; // 512px
+
+/* 바이옴 ID */
+const B_WATER = 0, B_SAND = 1, B_GRASS = 2, B_FOREST = 3, B_SNOW = 4,
+      B_DESERT = 5, B_VOLCANIC = 6, B_CRYSTAL = 7, B_ROCK = 8, B_LAVA = 9;
+
+const BIOME_INFO = {
+  [B_WATER]:   { name: '호수',   base: [27, 59, 111],  spd: 0.55 },
+  [B_SAND]:    { name: '해변',   base: [233, 208, 156], spd: 1.0 },
+  [B_GRASS]:   { name: '초원',   base: [76, 175, 109], spd: 1.0 },
+  [B_FOREST]:  { name: '숲',     base: [46, 125, 79],  spd: 0.95 },
+  [B_SNOW]:    { name: '설원',   base: [223, 233, 245], spd: 1.0 },
+  [B_DESERT]:  { name: '사막',   base: [222, 158, 82], spd: 1.0 },
+  [B_VOLCANIC]:{ name: '화산지대', base: [74, 48, 56], spd: 1.0 },
+  [B_CRYSTAL]: { name: '도파민 광산', base: [91, 59, 143], spd: 1.0 },
+  [B_ROCK]:    { name: '암석지대', base: [138, 143, 152], spd: 1.0 },
+  [B_LAVA]:    { name: '용암',   base: [255, 90, 31], spd: 0.85 },
+};
+
+const MapGen = {
+  seed: 1,
+  nE: null, nM: null, nT: null, nC: null, nD: null,
+  chunks: new Map(),
+  mmCache: null, mmTime: 0,
+
+  init(seed) {
+    this.seed = seed >>> 0;
+    this.nE = new SimplexNoise(Mulberry32(this.seed + 101));
+    this.nM = new SimplexNoise(Mulberry32(this.seed + 202));
+    this.nT = new SimplexNoise(Mulberry32(this.seed + 303));
+    this.nC = new SimplexNoise(Mulberry32(this.seed + 404));
+    this.nD = new SimplexNoise(Mulberry32(this.seed + 505));
+    for (const c of this.chunks.values()) c.canvas = null;
+    this.chunks.clear();
+    this.mmCache = null;
+  },
+
+  /* 좌표 → 바이옴 ID (타일 단위) */
+  biome(tx, ty) {
+    const e = this.nE.noise2D(tx / 34, ty / 34) * 0.5 + 0.5;         // 고도
+    const m = this.nM.noise2D(tx / 26, ty / 26) * 0.5 + 0.5;         // 습도
+    const t = this.nT.noise2D(tx / 60, ty / 60) * 0.5 + 0.5;         // 기온
+    const c = this.nC.noise2D(tx / 22, ty / 22) * 0.5 + 0.5;         // 크리스탈
+
+    if (e < 0.26) return B_WATER;
+    if (e < 0.31) return B_SAND;
+    // 도파민 광산: 희귀한 마법 광맥
+    if (c > 0.855 && e > 0.4 && e < 0.72) return B_CRYSTAL;
+    if (e > 0.78) return B_ROCK;
+    if (t < 0.30) return B_SNOW;
+    if (t > 0.68 && e > 0.55) {
+      return (m > 0.58 && this.nD.noise2D(tx / 5, ty / 5) > 0.15) ? B_LAVA : B_VOLCANIC;
+    }
+    if (t > 0.66 && m < 0.38) return B_DESERT;
+    if (m > 0.60) return B_FOREST;
+    return B_GRASS;
+  },
+
+  /* 픽셀 좌표 → 지형 이동 속도 배율 */
+  groundSpeed(x, y) {
+    const b = this.biome(Math.floor(x / TILE), Math.floor(y / TILE));
+    return BIOME_INFO[b].spd;
+  },
+
+  isLava(x, y) {
+    return this.biome(Math.floor(x / TILE), Math.floor(y / TILE)) === B_LAVA;
+  },
+
+  /* 청크 생성 (오프스크린 캔버스에 지형 + 장식을 한 번만 그림) */
+  getChunk(cx, cy) {
+    const key = cx + ',' + cy;
+    let ch = this.chunks.get(key);
+    if (ch) return ch;
+
+    const cv = document.createElement('canvas');
+    cv.width = CHUNK_PX; cv.height = CHUNK_PX;
+    const ctx = cv.getContext('2d');
+    const rng = Mulberry32((cx * 73856093) ^ (cy * 19349663) ^ this.seed);
+
+    const decos = [];
+    for (let ty = 0; ty < CHUNK; ty++) {
+      for (let tx = 0; tx < CHUNK; tx++) {
+        const wtx = cx * CHUNK + tx, wty = cy * CHUNK + ty;
+        const b = this.biome(wtx, wty);
+        const px = tx * TILE, py = ty * TILE;
+
+        // 타일 바탕색 (해시 기반 미세 변주)
+        const v = 0.9 + hashi(wtx, wty, this.seed) * 0.18;
+        const [r, g2, b2] = BIOME_INFO[b].base;
+        ctx.fillStyle = `rgb(${(r * v) | 0},${(g2 * v) | 0},${(b2 * v) | 0})`;
+        ctx.fillRect(px, py, TILE, TILE);
+
+        // 타일 디테일
+        this.tileDetail(ctx, b, px, py, wtx, wty, rng);
+
+        // 장식 후보 수집
+        const de = this.decoFor(b, wtx, wty, rng);
+        if (de) decos.push({ ...de, x: px + 10 + rng() * (TILE - 20), y: py + 14 + rng() * (TILE - 20) });
+      }
+    }
+    // 장식은 y 정렬 후 시각적으로 자연스럽게 그림
+    decos.sort((a, b2) => a.y - b2.y);
+    for (const d of decos) this.drawDeco(ctx, d, rng);
+
+    ch = { canvas: cv, cx, cy };
+    this.chunks.set(key, ch);
+
+    // 메모리 가드: 너무 많은 청크면 오래된 것 해제
+    if (this.chunks.size > 160) {
+      const pcx = Math.floor((G.camera ? G.camera.x : 0) / CHUNK_PX);
+      const pcy = Math.floor((G.camera ? G.camera.y : 0) / CHUNK_PX);
+      for (const [k, c] of this.chunks) {
+        if (Math.abs(c.cx - pcx) > 5 || Math.abs(c.cy - pcy) > 5) this.chunks.delete(k);
+        if (this.chunks.size <= 110) break;
+      }
+    }
+    return ch;
+  },
+
+  tileDetail(ctx, b, px, py, wtx, wty, rng) {
+    const h = hashi(wtx * 3, wty * 7, this.seed + 9);
+    ctx.globalAlpha = 0.25;
+    if (b === B_GRASS || b === B_FOREST) {
+      ctx.fillStyle = h > 0.5 ? '#2e7d4f' : '#66c78f';
+      ctx.fillRect(px + h * 40, py + h * 34, 14, 8);
+      ctx.fillRect(px + (1 - h) * 38, py + h * 46, 10, 6);
+    } else if (b === B_WATER) {
+      ctx.fillStyle = '#3a6ba5';
+      ctx.fillRect(px + h * 30, py + h * 40, 26, 4);
+    } else if (b === B_SNOW) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(px + h * 36, py + h * 30, 12, 6);
+    } else if (b === B_DESERT || b === B_SAND) {
+      ctx.fillStyle = '#c78a4a';
+      ctx.fillRect(px + h * 40, py + h * 42, 12, 5);
+    } else if (b === B_VOLCANIC) {
+      ctx.fillStyle = '#2e1c22';
+      ctx.fillRect(px + h * 38, py + h * 38, 16, 8);
+    } else if (b === B_ROCK) {
+      ctx.fillStyle = '#6f747d';
+      ctx.fillRect(px + h * 36, py + h * 36, 14, 9);
+    } else if (b === B_CRYSTAL) {
+      ctx.fillStyle = '#4a2f78';
+      ctx.fillRect(px + h * 38, py + h * 38, 12, 7);
+    } else if (b === B_LAVA) {
+      ctx.fillStyle = '#ffd23f';
+      ctx.fillRect(px + h * 30, py + h * 34, 20, 6);
+    }
+    ctx.globalAlpha = 1;
+  },
+
+  /* 바이옴별 장식 결정 (확률) */
+  decoFor(b, wtx, wty, rng) {
+    const r = rng();
+    switch (b) {
+      case B_GRASS:  if (r < 0.045) return { k: 'tree' }; if (r < 0.10) return { k: 'flower' }; break;
+      case B_FOREST: if (r < 0.17) return { k: 'tree' }; if (r < 0.22) return { k: 'mushroom' }; break;
+      case B_SNOW:   if (r < 0.08) return { k: 'pine' }; if (r < 0.11) return { k: 'rock' }; break;
+      case B_DESERT: if (r < 0.04) return { k: 'cactus' }; if (r < 0.065) return { k: 'rock' }; break;
+      case B_SAND:   if (r < 0.02) return { k: 'shell' }; break;
+      case B_VOLCANIC: if (r < 0.07) return { k: 'lavarock' }; break;
+      case B_CRYSTAL:  if (r < 0.13) return { k: 'crystal' }; break;
+      case B_ROCK:   if (r < 0.2) return { k: 'rock' }; break;
+    }
+    return null;
+  },
+
+  /* 장식 스프라이트 그리기 (에셋 없이 캔버스로) */
+  drawDeco(ctx, d, rng) {
+    const s = 0.8 + rng() * 0.5;
+    const x = d.x, y = d.y;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(s, s);
+    switch (d.k) {
+      case 'tree':
+        ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.beginPath(); ctx.ellipse(0, 6, 16, 6, 0, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#6b4a2f'; ctx.fillRect(-4, -14, 8, 20);
+        ctx.fillStyle = '#2f8f52'; ctx.beginPath(); ctx.arc(0, -26, 17, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#43b86e'; ctx.beginPath(); ctx.arc(-7, -31, 11, 0, TAU); ctx.arc(9, -29, 10, 0, TAU); ctx.fill();
+        break;
+      case 'pine':
+        ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.beginPath(); ctx.ellipse(0, 5, 14, 5, 0, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#5d4037'; ctx.fillRect(-3, -8, 6, 13);
+        ctx.fillStyle = '#1d6e46';
+        for (let i = 0; i < 3; i++) {
+          ctx.beginPath();
+          ctx.moveTo(0, -40 + i * 12); ctx.lineTo(-13 + i * 2, -18 + i * 10); ctx.lineTo(13 - i * 2, -18 + i * 10);
+          ctx.closePath(); ctx.fill();
+        }
+        ctx.fillStyle = 'rgba(255,255,255,0.75)';
+        ctx.beginPath(); ctx.moveTo(0, -40); ctx.lineTo(-6, -28); ctx.lineTo(6, -28); ctx.closePath(); ctx.fill();
+        break;
+      case 'cactus':
+        ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.beginPath(); ctx.ellipse(0, 6, 12, 4, 0, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#3d9e5f';
+        this.rr(ctx, -5, -26, 10, 32, 5); ctx.fill();
+        this.rr(ctx, -14, -18, 8, 12, 4); ctx.fill();
+        this.rr(ctx, 6, -22, 8, 12, 4); ctx.fill();
+        break;
+      case 'rock':
+        ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.beginPath(); ctx.ellipse(0, 4, 13, 5, 0, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#9aa0a8';
+        ctx.beginPath(); ctx.moveTo(-12, 4); ctx.lineTo(-9, -9); ctx.lineTo(0, -13); ctx.lineTo(10, -8); ctx.lineTo(12, 4); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#c3c9d1'; ctx.beginPath(); ctx.moveTo(-9, -9); ctx.lineTo(0, -13); ctx.lineTo(4, -4); ctx.lineTo(-5, -2); ctx.closePath(); ctx.fill();
+        break;
+      case 'lavarock':
+        ctx.fillStyle = '#3a252c';
+        ctx.beginPath(); ctx.moveTo(-13, 4); ctx.lineTo(-8, -10); ctx.lineTo(3, -14); ctx.lineTo(12, -6); ctx.lineTo(13, 4); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = '#ff5a1f'; ctx.lineWidth = 2.4;
+        ctx.beginPath(); ctx.moveTo(-8, -2); ctx.lineTo(-2, -8); ctx.lineTo(4, -3); ctx.stroke();
+        break;
+      case 'crystal': {
+        const hue = 265 + rng() * 60;
+        ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(0, 5, 12, 4, 0, 0, TAU); ctx.fill();
+        const grad = ctx.createLinearGradient(0, -34, 0, 6);
+        grad.addColorStop(0, `hsl(${hue},100%,80%)`);
+        grad.addColorStop(1, `hsl(${hue},85%,45%)`);
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.moveTo(0, -36); ctx.lineTo(-10, -10); ctx.lineTo(-4, 5); ctx.lineTo(6, 5); ctx.lineTo(11, -12); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.beginPath(); ctx.moveTo(0, -36); ctx.lineTo(-4, -12); ctx.lineTo(-1, 2); ctx.closePath(); ctx.fill();
+        break;
+      }
+      case 'flower': {
+        const c = ['#ff5d8f', '#ffd23f', '#35f0ff'][rng() * 3 | 0];
+        ctx.fillStyle = c;
+        for (let i = 0; i < 4; i++) {
+          const a = i / 4 * TAU;
+          ctx.beginPath(); ctx.arc(Math.cos(a) * 4, -4 + Math.sin(a) * 4, 3.4, 0, TAU); ctx.fill();
+        }
+        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, -4, 2.6, 0, TAU); ctx.fill();
+        break;
+      }
+      case 'mushroom':
+        ctx.fillStyle = '#e8e0d0'; ctx.fillRect(-2.6, -6, 5.2, 9);
+        ctx.fillStyle = '#e0455f';
+        ctx.beginPath(); ctx.arc(0, -7, 8, Math.PI, 0); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(-3, -9, 2, 0, TAU); ctx.arc(3.4, -8, 1.6, 0, TAU); ctx.fill();
+        break;
+      case 'shell':
+        ctx.fillStyle = '#f7c8d8';
+        ctx.beginPath(); ctx.arc(0, 0, 7, Math.PI, 0); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = '#e291ac'; ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-4, -6); ctx.moveTo(0, 0); ctx.lineTo(0, -7); ctx.moveTo(0, 0); ctx.lineTo(4, -6); ctx.stroke();
+        break;
+    }
+    ctx.restore();
+  },
+
+  rr(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  },
+
+  /* 카메라 뷰에 필요한 청크들 그리기 */
+  drawWorld(ctx, camX, camY, vw, vh) {
+    const c0x = Math.floor(camX / CHUNK_PX), c1x = Math.floor((camX + vw) / CHUNK_PX);
+    const c0y = Math.floor(camY / CHUNK_PX), c1y = Math.floor((camY + vh) / CHUNK_PX);
+    for (let cy = c0y; cy <= c1y; cy++) {
+      for (let cx = c0x; cx <= c1x; cx++) {
+        const ch = this.getChunk(cx, cy);
+        ctx.drawImage(ch.canvas, cx * CHUNK_PX, cy * CHUNK_PX);
+      }
+    }
+  },
+
+  /* 미니맵: 주변 바이옴 + 엔티티 점 (0.7초 캐시) */
+  drawMinimap(mctx, W, px, py, enemies, boss) {
+    const now = performance.now();
+    if (!this.mmCache || now - this.mmTime > 700) {
+      this.mmTime = now;
+      if (!this.mmCache) { this.mmCache = document.createElement('canvas'); this.mmCache.width = W; this.mmCache.height = W; }
+      const cctx = this.mmCache.getContext('2d');
+      const scale = 26; // 1px = 26 world px
+      const ox = px / scale - W / 2, oy = py / scale - W / 2;
+      for (let y = 0; y < W; y += 2) {
+        for (let x = 0; x < W; x += 2) {
+          const b = this.biome(Math.floor((ox + x) * scale / TILE), Math.floor((oy + y) * scale / TILE));
+          cctx.fillStyle = `rgb(${BIOME_INFO[b].base.join(',')})`;
+          cctx.fillRect(x, y, 2, 2);
+        }
+      }
+    }
+    mctx.clearRect(0, 0, W, W);
+    mctx.drawImage(this.mmCache, 0, 0);
+    const scale = 26;
+    // 적 점
+    mctx.fillStyle = 'rgba(255,70,70,0.9)';
+    for (const e of enemies) {
+      const mx = (e.x - px) / scale + W / 2, my = (e.y - py) / scale + W / 2;
+      if (mx < 0 || my < 0 || mx > W || my > W) continue;
+      mctx.fillStyle = e.boss ? '#ff0044' : (e.elite ? '#ffa500' : 'rgba(255,70,70,0.85)');
+      const s = e.boss ? 5 : (e.elite ? 3.5 : 2);
+      mctx.fillRect(mx - s / 2, my - s / 2, s, s);
+    }
+    if (boss) {
+      const mx = (boss.x - px) / scale + W / 2, my = (boss.y - py) / scale + W / 2;
+      mctx.fillStyle = '#ff0044';
+      mctx.beginPath(); mctx.arc(mx, my, 5, 0, TAU); mctx.fill();
+      mctx.strokeStyle = '#fff'; mctx.lineWidth = 1.6; mctx.stroke();
+    }
+    // 플레이어
+    mctx.fillStyle = '#fff';
+    mctx.beginPath(); mctx.arc(W / 2, W / 2, 3.4, 0, TAU); mctx.fill();
+    mctx.strokeStyle = '#35f0ff'; mctx.lineWidth = 1.6; mctx.stroke();
+  },
+};

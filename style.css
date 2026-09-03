@@ -1,0 +1,409 @@
+/* ============================================================
+   도파민 서바이버 - 스타일
+   ============================================================ */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --pink: #ff4d9d;
+  --cyan: #35f0ff;
+  --gold: #ffd23f;
+  --bg: #0b0e1a;
+  --panel: rgba(16, 20, 38, 0.92);
+}
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  font-family: 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+  touch-action: none;
+  -webkit-user-select: none; user-select: none;
+}
+
+#game { position: fixed; inset: 0; display: block; }
+
+.hidden { display: none !important; }
+
+/* ============ HUD ============ */
+#hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+
+#xpbar {
+  position: absolute; top: 0; left: 0; right: 0; height: 14px;
+  background: rgba(0,0,0,0.55);
+  border-bottom: 2px solid rgba(255,255,255,0.12);
+}
+#xpfill {
+  height: 100%; width: 0%;
+  background: linear-gradient(90deg, #35f0ff, #ff4d9d, #ffd23f);
+  background-size: 200% 100%;
+  animation: xpshine 2s linear infinite;
+  transition: width 0.15s;
+}
+@keyframes xpshine { 0% { background-position: 0 0; } 100% { background-position: 200% 0; } }
+
+#lvbadge {
+  position: absolute; top: 3px; left: 8px;
+  font-size: 11px; font-weight: 900; color: #fff;
+  text-shadow: 0 1px 3px #000;
+}
+
+#topbar {
+  position: absolute; top: 18px; left: 0; right: 0;
+  display: flex; justify-content: center; align-items: center; gap: 18px;
+}
+#timer {
+  font-size: 30px; font-weight: 900; color: #fff;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+  letter-spacing: 2px;
+}
+#topstats { position: absolute; right: 12px; top: 0; display: flex; gap: 12px; }
+#kills, #gemcount {
+  font-size: 14px; font-weight: 800; color: #fff;
+  text-shadow: 0 1px 4px #000;
+}
+
+#seedTag {
+  position: absolute; top: 58px; left: 10px;
+  font-size: 10px; color: rgba(255,255,255,0.4);
+}
+
+/* 보스 바 */
+#bossbar {
+  position: absolute; top: 58px; left: 50%; transform: translateX(-50%);
+  width: min(520px, 74vw); text-align: center;
+}
+#bossname {
+  font-size: 15px; font-weight: 900; color: var(--gold);
+  text-shadow: 0 1px 4px #000; margin-bottom: 3px;
+}
+#bosstrack {
+  height: 12px; border-radius: 6px;
+  background: rgba(0,0,0,0.6);
+  border: 2px solid rgba(255,45,149,0.7);
+  overflow: hidden;
+}
+#bossfill {
+  height: 100%; width: 100%;
+  background: linear-gradient(90deg, #ff0044, #ff4d9d);
+  transition: width 0.2s;
+}
+
+/* 미니맵 */
+#minimap {
+  position: absolute; top: 60px; right: 10px;
+  width: 132px; height: 132px;
+  border-radius: 10px;
+  border: 2px solid rgba(53,240,255,0.45);
+  box-shadow: 0 2px 14px rgba(0,0,0,0.6);
+  opacity: 0.92;
+}
+
+/* 하단 바 */
+#bottombar {
+  position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px;
+  flex-wrap: wrap; justify-content: center;
+}
+#weaponBar, #passiveBar { display: flex; gap: 5px; }
+.slot {
+  width: 42px; height: 46px;
+  background: var(--panel);
+  border: 2px solid rgba(53,240,255,0.4);
+  border-radius: 9px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-size: 17px;
+}
+.slot.passive { border-color: rgba(255,210,63,0.4); }
+.slot b { display: flex; gap: 2px; margin-top: 2px; }
+.slot i {
+  width: 4px; height: 4px; border-radius: 50%;
+  background: rgba(255,255,255,0.2);
+}
+.slot i.on { background: var(--cyan); box-shadow: 0 0 4px var(--cyan); }
+.slot.passive i.on { background: var(--gold); box-shadow: 0 0 4px var(--gold); }
+
+#hpbar {
+  position: relative;
+  width: min(300px, 46vw); height: 22px;
+  background: rgba(0,0,0,0.6);
+  border: 2px solid rgba(255,255,255,0.3);
+  border-radius: 11px; overflow: hidden;
+}
+#hpfill {
+  height: 100%; width: 100%;
+  background: linear-gradient(90deg, #2ecc71, #54e37c);
+  transition: width 0.15s, background 0.3s;
+}
+#hpbar span {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 900; color: #fff;
+  text-shadow: 0 1px 2px #000;
+}
+
+/* 콤보 */
+#combo {
+  position: absolute; bottom: 76px; right: 14px;
+  font-size: 22px; font-weight: 900;
+  color: var(--gold);
+  text-shadow: 0 0 14px rgba(255,159,28,0.9), 0 2px 4px #000;
+  opacity: 0; transform: scale(0.6);
+  transition: opacity 0.15s, transform 0.15s;
+}
+#combo.on { opacity: 1; transform: scale(1); }
+
+/* 배너 */
+#banner {
+  position: absolute; top: 22%; left: 50%;
+  transform: translateX(-50%);
+  font-size: clamp(24px, 5vw, 42px);
+  font-weight: 900; white-space: nowrap;
+  text-shadow: 0 2px 10px rgba(0,0,0,0.8), 0 0 30px currentColor;
+  opacity: 0; pointer-events: none;
+}
+#banner.show { animation: bannerPop 2.2s ease forwards; }
+@keyframes bannerPop {
+  0% { opacity: 0; transform: translateX(-50%) scale(0.3); }
+  12% { opacity: 1; transform: translateX(-50%) scale(1.15); }
+  20% { transform: translateX(-50%) scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(-50%) scale(1); }
+}
+
+/* 아이콘 버튼 */
+.iconbtn {
+  position: fixed; z-index: 30;
+  width: 40px; height: 40px;
+  border-radius: 10px;
+  border: 2px solid rgba(255,255,255,0.25);
+  background: rgba(0,0,0,0.5);
+  color: #fff; font-size: 17px;
+  cursor: pointer;
+}
+#muteBtn { bottom: 10px; right: 10px; }
+#pauseBtn { bottom: 56px; right: 10px; }
+
+/* 조이스틱 */
+#joystick {
+  position: fixed; z-index: 20;
+  width: 110px; height: 110px;
+  margin: -55px 0 0 -55px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.3);
+  background: rgba(255,255,255,0.06);
+  display: none; pointer-events: none;
+}
+#joystick.on { display: block; }
+#joystick div {
+  position: absolute; left: 50%; top: 50%;
+  width: 46px; height: 46px; margin: -23px 0 0 -23px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.35);
+  border: 2px solid rgba(255,255,255,0.5);
+}
+
+/* ============ 오버레이 공통 ============ */
+.overlay {
+  position: fixed; inset: 0; z-index: 40;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(5, 8, 18, 0.72);
+  backdrop-filter: blur(4px);
+  padding: 16px;
+}
+.panel {
+  background: var(--panel);
+  border: 2px solid rgba(53,240,255,0.35);
+  border-radius: 18px;
+  padding: 26px 30px;
+  text-align: center;
+  box-shadow: 0 10px 50px rgba(0,0,0,0.7), 0 0 40px rgba(53,240,255,0.08);
+  animation: panelIn 0.3s cubic-bezier(0.2, 1.4, 0.4, 1);
+  max-width: min(92vw, 640px);
+  max-height: 92vh;
+  overflow-y: auto;
+}
+@keyframes panelIn {
+  from { transform: scale(0.85) translateY(20px); opacity: 0; }
+  to { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+/* 타이틀 */
+.title-panel { padding: 34px 38px; }
+.logo { font-size: clamp(34px, 7vw, 58px); font-weight: 900; line-height: 1.15; }
+.logo-dopa {
+  background: linear-gradient(180deg, #ffd23f, #ff4d9d);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 2px 12px rgba(255,77,157,0.5));
+  animation: dopaPulse 1.6s ease-in-out infinite;
+}
+@keyframes dopaPulse {
+  0%, 100% { filter: drop-shadow(0 2px 12px rgba(255,77,157,0.5)); }
+  50% { filter: drop-shadow(0 2px 22px rgba(255,210,63,0.9)); }
+}
+.logo-surv { color: #fff; text-shadow: 0 2px 14px rgba(53,240,255,0.6); }
+.tagline { color: rgba(255,255,255,0.65); font-size: 13px; margin: 10px 0 22px; }
+
+.seed-row { display: flex; gap: 8px; justify-content: center; margin-bottom: 14px; }
+#seedInput {
+  width: 220px; padding: 9px 12px;
+  background: rgba(0,0,0,0.45);
+  border: 2px solid rgba(255,255,255,0.2);
+  border-radius: 9px;
+  color: #fff; font-size: 14px;
+  outline: none;
+}
+#seedInput:focus { border-color: var(--cyan); }
+
+.howto {
+  margin-top: 20px;
+  color: rgba(255,255,255,0.75);
+  font-size: 13px; line-height: 2;
+}
+.howto b { color: var(--cyan); }
+.howto b.pink { color: var(--pink); }
+.best { margin-top: 12px; color: var(--gold); font-weight: 800; font-size: 14px; }
+
+/* 버튼 */
+.btn {
+  display: block; width: 100%;
+  margin: 8px 0; padding: 13px 22px;
+  background: rgba(53,240,255,0.12);
+  border: 2px solid var(--cyan);
+  border-radius: 12px;
+  color: #fff; font-size: 16px; font-weight: 800;
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.15s, background 0.15s;
+  font-family: inherit;
+}
+.btn:hover { background: rgba(53,240,255,0.25); transform: translateY(-2px); box-shadow: 0 6px 22px rgba(53,240,255,0.35); }
+.btn:active { transform: translateY(0) scale(0.97); }
+.btn.start {
+  background: linear-gradient(90deg, #ff4d9d, #ffd23f);
+  border-color: transparent;
+  font-size: 19px;
+  animation: startGlow 1.4s ease-in-out infinite;
+}
+@keyframes startGlow {
+  0%, 100% { box-shadow: 0 0 16px rgba(255,77,157,0.5); }
+  50% { box-shadow: 0 0 32px rgba(255,210,63,0.8); }
+}
+.btn.danger { border-color: #ff5d5d; background: rgba(255,93,93,0.12); }
+.btn.small { width: auto; display: inline-block; margin: 0; padding: 9px 13px; font-size: 16px; }
+
+/* 레벨업 카드 */
+.lu-head {
+  font-size: 30px; font-weight: 900;
+  color: var(--gold);
+  text-shadow: 0 0 24px rgba(255,210,63,0.7);
+  animation: dopaPulse 1s infinite;
+}
+.lu-sub { color: rgba(255,255,255,0.6); font-size: 13px; margin: 6px 0 18px; }
+#lu-cards {
+  display: flex; gap: 14px; justify-content: center;
+  flex-wrap: wrap;
+}
+.lu-card {
+  position: relative;
+  width: 158px; min-height: 190px;
+  padding: 18px 12px 14px;
+  background: linear-gradient(180deg, rgba(30,38,66,0.95), rgba(16,20,38,0.95));
+  border: 2px solid rgba(53,240,255,0.4);
+  border-radius: 14px;
+  color: #fff; cursor: pointer;
+  font-family: inherit;
+  transition: transform 0.12s, box-shadow 0.15s, border-color 0.15s;
+  animation: cardIn 0.35s cubic-bezier(0.2, 1.4, 0.4, 1) backwards;
+}
+@keyframes cardIn {
+  from { transform: translateY(36px) scale(0.7); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+.lu-card:hover {
+  transform: translateY(-6px) scale(1.04);
+  border-color: var(--gold);
+  box-shadow: 0 10px 34px rgba(255,210,63,0.35);
+}
+.lu-card.new { border-color: rgba(255,77,157,0.7); }
+.lu-badge {
+  position: absolute; top: -10px; left: 50%; transform: translateX(-50%);
+  font-size: 10px; font-weight: 900;
+  padding: 3px 10px; border-radius: 20px;
+  background: var(--cyan); color: #04121a;
+  box-shadow: 0 2px 8px rgba(53,240,255,0.6);
+}
+.lu-card.new .lu-badge { background: var(--pink); color: #fff; }
+.lu-emoji { font-size: 44px; margin: 8px 0 10px; }
+.lu-title { font-size: 14px; font-weight: 900; margin-bottom: 8px; }
+.lu-desc { font-size: 11.5px; color: rgba(255,255,255,0.7); line-height: 1.55; }
+.lu-key {
+  margin-top: 10px; font-size: 10px;
+  color: rgba(255,255,255,0.35);
+}
+
+/* 상자 */
+.ch-panel { min-width: min(92vw, 480px); }
+#ch-title {
+  font-size: 26px; font-weight: 900;
+  color: var(--gold);
+  text-shadow: 0 0 20px rgba(255,210,63,0.7);
+}
+.ch-sub { color: rgba(255,255,255,0.6); font-size: 13px; margin: 6px 0 20px; }
+#ch-slots {
+  display: flex; gap: 12px; justify-content: center;
+  flex-wrap: wrap; margin-bottom: 18px;
+}
+.ch-slot {
+  width: 74px; height: 74px;
+  background: rgba(0,0,0,0.5);
+  border: 3px solid rgba(255,210,63,0.5);
+  border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+}
+.ch-slot.stopped {
+  border-color: var(--gold);
+  box-shadow: 0 0 22px rgba(255,210,63,0.55);
+  animation: slotPop 0.3s cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+@keyframes slotPop { 0% { transform: scale(1.25); } 100% { transform: scale(1); } }
+.ch-spin { font-size: 40px; }
+#ch-result { color: #fff; font-size: 14px; font-weight: 700; min-height: 20px; margin-bottom: 10px; }
+
+/* 게임 오버 */
+.ov-title { font-size: 26px; font-weight: 900; margin-bottom: 14px; }
+#end-title {
+  font-size: clamp(26px, 6vw, 40px); font-weight: 900;
+  text-shadow: 0 0 26px currentColor;
+  margin-bottom: 6px;
+}
+#end-sub { color: rgba(255,255,255,0.7); font-size: 14px; margin-bottom: 16px; }
+#end-stats {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 8px 22px;
+  margin: 0 auto 18px; max-width: 380px;
+  text-align: left;
+}
+#end-stats div {
+  display: flex; justify-content: space-between;
+  font-size: 13.5px; color: rgba(255,255,255,0.75);
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  padding: 5px 0;
+}
+#end-stats b { color: #fff; }
+#end-stats b.gold { color: var(--gold); font-size: 15px; }
+
+/* 모바일 */
+@media (max-width: 720px) {
+  #timer { font-size: 22px; }
+  #minimap { width: 96px; height: 96px; top: 52px; }
+  #combo { bottom: 96px; right: 8px; font-size: 17px; }
+  .slot { width: 36px; height: 40px; font-size: 15px; }
+  #bottombar { bottom: 6px; gap: 8px; }
+  .lu-card { width: 138px; min-height: 175px; }
+  #end-stats { grid-template-columns: 1fr; }
+  .title-panel { padding: 24px 20px; }
+  #muteBtn { bottom: auto; top: 18px; right: 10px; }
+  #pauseBtn { bottom: auto; top: 64px; right: 10px; }
+  #topstats { top: 40px; right: 58px; }
+}
