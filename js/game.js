@@ -680,6 +680,8 @@ function initRun(seed) {
   G.rage = { value: 0, max: 100, active: false, t: 0 };
   G.userZoom = 1;
   G.zoom = G.baseZoom || 1;
+  G.lavaTick = 0;
+  document.body.classList.remove('rush'); // 이전 러시 상태 잔존 방지
   MapGen.initFog();
 
   G.player = {
@@ -701,6 +703,11 @@ function initRun(seed) {
   document.getElementById('seedTag').textContent = '시드 ' + G.seed.toString(16).toUpperCase();
   document.getElementById('hud').classList.remove('hidden');
   document.getElementById('pauseBtn').classList.remove('hidden');
+  // 이전 런에서 열려 있던 모든 오버레이 정리 (재시작 시 화면 갇힘 방지)
+  for (const id of ['overlay-levelup', 'overlay-chest', 'overlay-pause', 'overlay-end']) {
+    document.getElementById(id).classList.add('hidden');
+  }
+  G.luChoices = null;
   renderHUDBars();
   updateHUD(true);
   QUESTS.reset(G.seed);
@@ -1032,7 +1039,12 @@ function updateFx(dt) {
 
 /* ---------- 메인 업데이트 ---------- */
 function update(dt) {
-  if (G.hitStop > 0) { G.hitStop -= dt; dt *= 0.12; }
+  // 히트스톱: 게임 시간(G.time/분/스폰 스케줄)은 원본 속도로 흐르고
+  // 월드 시뮬레이션(이동/판정/파티클)만 느려지게 두 축으로 분리.
+  // 이전엔 dt 자체를 1/8로 줄여 킬이 빈번한 후반에 실제 스폰 스케줄·보스 타이머가
+  // 8배 늘어지는 왜곡이 있었다.
+  let simDt = dt;
+  if (G.hitStop > 0) { G.hitStop -= dt; simDt = dt * 0.12; }
   G.time += dt;
   G.minute = G.time / 60;
   G.frame = (G.frame || 0) + 1;
@@ -1050,21 +1062,21 @@ function update(dt) {
     try { if (G.vibrate) G.vibrate(25); } catch (e) {}
   }
 
-  updatePlayer(dt);
-  updateSpawns(dt);
-  updateEnemies(dt);
-  updateCrystals(dt);
-  updateWeapons(dt);
-  updateProjectiles(dt);
-  updateEProjectiles(dt);
-  updateFx(dt);
-  updateRage(dt);
-  updateHazards(dt);
-  QUESTS.update(dt);
-  updatePOIs(dt);
-  updateGolden(dt);
-  WORLD_EVENTS.update(dt);
-  POST.update(dt);
+  updatePlayer(simDt);
+  updateSpawns(simDt);
+  updateEnemies(simDt);
+  updateCrystals(simDt);
+  updateWeapons(simDt);
+  updateProjectiles(simDt);
+  updateEProjectiles(simDt);
+  updateFx(simDt);
+  updateRage(simDt);
+  updateHazards(simDt);
+  QUESTS.update(simDt);
+  updatePOIs(simDt);
+  updateGolden(simDt);
+  WORLD_EVENTS.update(simDt);
+  POST.update(simDt);
 
   // 콤보 감소
   if (G.comboT > 0) {
@@ -1620,15 +1632,16 @@ function renderHUDBars() {
 /* ---------- 게임 오버 / 승리 ---------- */
 function endScreen(win) {
   G.state = win ? 'victory' : 'gameover';
+  document.body.classList.remove('rush'); // 러시 중 사망 시 화면 틴트/보더 잔존 방지
   MUSIC.stop();
   SFX.play(win ? 'victory' : 'gameover');
   zoomPunchCam(0.04);
   shakeCam(win ? 4 : 6);
 
   const score = G.stats.kills * 15 + G.stats.gems * 5 + G.player.level * 200 + G.stats.bestCombo * 10 + Math.floor(G.minute) * 300 + (win ? 10000 : 0);
-  const best = Math.max(score, parseInt(localStorage.getItem('ds_best') || '0', 10));
+    const best = Math.max(score, parseInt(lsGet('ds_best') || '0', 10));
   const isRecord = score >= best && score > 0;
-  localStorage.setItem('ds_best', String(best));
+  lsSet('ds_best', String(best));
 
   document.getElementById('end-title').textContent = win ? '🏆 승리!! 도파민 마스터!' : '💀 게임 오버';
   document.getElementById('end-title').style.color = win ? '#ffd23f' : '#ff5d5d';
@@ -1660,16 +1673,17 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     // 버튼 포커스 상태 스페이스 중복 발동 방지
     if (document.activeElement && document.activeElement.tagName === 'BUTTON') document.activeElement.blur();
-    activateRush();
+    if (!e.repeat) activateRush();
   }
   if (e.code === 'Escape' || e.code === 'KeyP') togglePause();
   if (e.code === 'KeyF') toggleFullscreen();
   if (e.code === 'KeyM') { try { SFX.init(); SFX.setMuted(!SFX.muted); document.getElementById('muteBtn').textContent = SFX.muted ? '🔇' : '🔊'; } catch (err) {} }
   if (G.state === 'levelup') {
     const n = parseInt(e.key, 10);
-    if (n >= 1 && n <= 3 && G.luChoices && G.luChoices[n - 1]) pickCard(G.luChoices[n - 1]);
+    // 한 번 눌린 키는 keydown이 반복 발생(e.repeat)해 카드가 연달아 먹히지 않게
+    if (!e.repeat && n >= 1 && n <= 3 && G.luChoices && G.luChoices[n - 1]) pickCard(G.luChoices[n - 1]);
   } else if (G.state === 'chest') {
-    if (e.code === 'Enter' || e.code === 'Space') {
+    if ((e.code === 'Enter' || e.code === 'Space') && !e.repeat) {
       const done = document.getElementById('ch-done');
       if (done && !done.classList.contains('hidden')) done.click();
     }
@@ -1914,6 +1928,7 @@ const QUESTS = {
     G.stats.quests = this.count;
     this.current = null;
     G.questTarget = null;
+    const runId = G.seed; // 타임아웃 발동 시 다른 런이 진행 중이면 무시 (재시작 오염 방지)
     const p = G.player, m = G.minute;
     showBanner('✅ 퀘스트 완료! ' + q.text, '#7dffa0');
     SFX.play('chest');
@@ -1932,7 +1947,7 @@ const QUESTS = {
       G.pickups.push({ kind: 'chest', x: p.x + rand(-40, 40), y: p.y + rand(-40, 40), val: 4, t: 0, vx: 0, vy: 0 });
       showBanner('📦 퀘스트 보상 상자 등장!', '#e8b74a');
     }
-    setTimeout(() => { if (G.state === 'playing') this.next(); }, 1400);
+    setTimeout(() => { if (G.state === 'playing' && G.seed === runId) this.next(); }, 1400);
   },
 };
 
@@ -2395,7 +2410,7 @@ function bindUI() {
   // 햅틱 헬퍼 (모바일 타격감)
   G.vibrate = (ms) => { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {} };
 
-  const best = localStorage.getItem('ds_best');
+  const best = lsGet('ds_best');
   if (best) document.getElementById('bestScore').textContent = '🏅 최고 기록: ' + parseInt(best, 10).toLocaleString();
   // 랜딩 페이지(?seed=) 딥링크 지원: 시드 자동 입력
   try {

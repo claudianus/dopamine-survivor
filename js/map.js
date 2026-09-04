@@ -30,6 +30,8 @@ const MapGen = {
   nE: null, nM: null, nT: null, nC: null, nD: null, nF: null,
   chunks: new Map(),
   mmCache: null, mmTime: 0,
+  biomeCache: new Map(), // 타일 → 바이옴 (결정적 함수라 캐시 무해)
+  propsCache: new Map(), // 타일 → 지형 속성 (이동/적 AI 매 프레임 조회)
 
   init(seed) {
     this.seed = seed >>> 0;
@@ -42,27 +44,41 @@ const MapGen = {
     for (const c of this.chunks.values()) c.canvas = null;
     this.chunks.clear();
     this.mmCache = null;
+    this.biomeCache.clear();
+    this.propsCache.clear();
   },
 
-  /* 좌표 → 바이옴 ID (타일 단위) */
+  /* 좌표 → 바이옴 ID (타일 단위) — 캐시: 스폰/이동/AI에서 프레임당 수천 회 호출 */
   biome(tx, ty) {
+    const key = tx * 46341 + ty;
+    const hit = this.biomeCache.get(key);
+    if (hit !== undefined) {
+      // LRU 갱신: 상한 도달 시 오래된 항목 일괄 방출
+      if (this.biomeCache.size > 20000) this.biomeCache.clear();
+      return hit;
+    }
     const e = this.nE.noise2D(tx / 34, ty / 34) * 0.5 + 0.5;         // 고도
     const m = this.nM.noise2D(tx / 26, ty / 26) * 0.5 + 0.5;         // 습도
     const t = this.nT.noise2D(tx / 60, ty / 60) * 0.5 + 0.5;         // 기온
     const c = this.nC.noise2D(tx / 22, ty / 22) * 0.5 + 0.5;         // 크리스탈
 
-    if (e < 0.26) return B_WATER;
-    if (e < 0.31) return B_SAND;
+    let b;
+    if (e < 0.26) b = B_WATER;
+    else if (e < 0.31) b = B_SAND;
     // 도파민 광산: 희귀한 마법 광맥
-    if (c > 0.855 && e > 0.4 && e < 0.72) return B_CRYSTAL;
-    if (e > 0.78) return B_ROCK;
-    if (t < 0.30) return B_SNOW;
-    if (t > 0.68 && e > 0.55) {
-      return (m > 0.58 && this.nD.noise2D(tx / 5, ty / 5) > 0.15) ? B_LAVA : B_VOLCANIC;
+    else if (c > 0.855 && e > 0.4 && e < 0.72) b = B_CRYSTAL;
+    else if (e > 0.78) b = B_ROCK;
+    else if (t < 0.30) b = B_SNOW;
+    else if (t > 0.68 && e > 0.55) {
+      b = (m > 0.58 && this.nD.noise2D(tx / 5, ty / 5) > 0.15) ? B_LAVA : B_VOLCANIC;
     }
-    if (t > 0.66 && m < 0.38) return B_DESERT;
-    if (m > 0.60) return B_FOREST;
-    return B_GRASS;
+    else if (t > 0.66 && m < 0.38) b = B_DESERT;
+    else if (m > 0.60) b = B_FOREST;
+    else b = B_GRASS;
+
+    if (this.biomeCache.size > 20000) this.biomeCache.clear();
+    this.biomeCache.set(key, b);
+    return b;
   },
 
   /* 픽셀 좌표 → 지형 이동 속도 배율 */
@@ -96,9 +112,15 @@ const MapGen = {
     return this.featureFor(this.biome(tx, ty), tx, ty);
   },
 
-  /* 지형 물리 속성: 속도 배율 + 가속/마찰 + 특수 플래그 */
+  /* 지형 물리 속성: 속도 배율 + 가속/마찰 + 특수 플래그 (타일 단위 캐시) */
   groundProps(x, y) {
     const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE);
+    const key = tx * 46341 + ty;
+    const hit = this.propsCache.get(key);
+    if (hit !== undefined) {
+      if (this.propsCache.size > 8000) this.propsCache.clear();
+      return hit;
+    }
     const b = this.biome(tx, ty);
     let spd = BIOME_INFO[b].spd, accel = 12;
     let deep = false, ice = false, mud = false, thorn = false;
@@ -107,7 +129,10 @@ const MapGen = {
     else if (f === 'ice') { spd = Math.max(spd, 1.07); accel = 2.0; ice = true; }
     else if (f === 'mud') { spd *= 0.55; accel = 9; mud = true; }
     else if (f === 'thorn') { spd *= 0.62; thorn = true; }
-    return { spd, accel, deep, ice, mud, thorn, biome: b };
+    const props = { spd, accel, deep, ice, mud, thorn, biome: b };
+    if (this.propsCache.size > 8000) this.propsCache.clear();
+    this.propsCache.set(key, props);
+    return props;
   },
 
   /* 지형 피처 시각화 (청크 캔버스에 베이크) */

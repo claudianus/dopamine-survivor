@@ -97,7 +97,7 @@ function applyUpgrade(u) {
 /* ---------- 레벨업 UI ---------- */
 function openLevelUp() {
   G.state = 'levelup';
-  G.pendingLevelUps--;
+  G.pendingLevelUps = Math.max(0, G.pendingLevelUps - 1);
   SFX.play('levelup');
   shakeCam(4);
   POST.triggerChroma(0.3);
@@ -139,19 +139,24 @@ function openLevelUp() {
 }
 
 function pickCard(u) {
+  // 가드: 카드별 1회만 적용 (키보드 연타/더블클릭으로 같은 카드가 두 번 먹히는 것 방지)
+  if (G.state !== 'levelup') return;
+  G.state = 'playing'; // 즉시 닫고 — 남은 레벨업은 아래에서 스케줄 (어중간한 levelup 상태로 갇히는 것 방지)
   SFX.play('pick');
   applyUpgrade(u);
   document.getElementById('overlay-levelup').classList.add('hidden');
+  G.luChoices = null;
   if (G.pendingLevelUps > 0) {
-    setTimeout(openLevelUp, 120);
-  } else {
-    G.state = 'playing';
+    setTimeout(() => { if (G.state === 'playing') openLevelUp(); }, 120);
   }
 }
 
 /* ---------- 보물 상자 (슬롯머신!) ---------- */
+let _chSpinTimer = null; // 이전 상자의 슬롯 타이머 (재오픈 시 정리해 DOM 참조 크래시/이중 보상 방지)
+
 function openChest(val) {
   G.state = 'chest';
+  if (_chSpinTimer) { clearInterval(_chSpinTimer); _chSpinTimer = null; }
   // 방어: 혹시 떠 있는 레벨업 오버레이와 겹치지 않게 (상호배제)
   // 미해결 레벨업이 있었다면 카운트 복원 → 상자 종료 후 다시 열림 (유실 방지)
   const luEl = document.getElementById('overlay-levelup');
@@ -187,51 +192,59 @@ function openChest(val) {
   document.getElementById('ch-done').classList.add('hidden');
 
   // 진화 슬롯 특별 스타일
-  if (evoId) slots[0].el.parentElement.classList.add('evolve');
+  if (evoId && slots[0]) slots[0].el.parentElement.classList.add('evolve');
 
   const startT = performance.now();
   const stopAt = slots.map((_, i) => 800 + i * 480);
-  const spin = setInterval(() => {
+  // 슬롯 요소들이 현재 오버레이에 연결돼 있는지 틱마다 확인 —
+  // 재오픈으로 innerHTML이 교체되면 예전 틱이 죽은 노드를 건드리지 않게
+  const boxEl = box;
+  const spin = _chSpinTimer = setInterval(() => {
+    if (!boxEl.isConnected) { clearInterval(spin); if (_chSpinTimer === spin) _chSpinTimer = null; return; }
     const t = performance.now() - startT;
     let allStopped = true;
     slots.forEach((s, i) => {
-      if (!s.stopped) {
-        allStopped = false;
-        s.el.textContent = allEmojis[(Math.random() * allEmojis.length) | 0];
-        if (t > stopAt[i]) {
-          s.stopped = true;
-          if (i === 0 && evoId) {
-            const evo = EVOLUTIONS[evoId];
-            rewards.push({ type: 'evolve', id: evoId });
-            s.el.textContent = evo.emoji;
-            s.el.parentElement.classList.add('stopped', 'evolved');
-            showBannerOnce(evo.emoji + ' ' + evo.name + '!');
-          } else {
-            const u = buildChoices(1)[0];
-            rewards.push(u);
-            const def = u.type === 'weapon' ? WEAPON_DEFS[u.id] : (u.type === 'passive' ? PASSIVE_DEFS[u.id] : u);
-            s.el.textContent = def.emoji || u.emoji;
-            s.el.parentElement.classList.add('stopped');
-          }
-          SFX.play('tick');
+      if (s.stopped || !s.el) return; // 멈췄거나 슬롯 DOM이 사라졌으면 무시
+      allStopped = false;
+      s.el.textContent = allEmojis[(Math.random() * allEmojis.length) | 0];
+      if (t > stopAt[i]) {
+        s.stopped = true;
+        if (i === 0 && evoId) {
+          const evo = EVOLUTIONS[evoId];
+          rewards.push({ type: 'evolve', id: evoId });
+          s.el.textContent = evo.emoji;
+          s.el.parentElement.classList.add('stopped', 'evolved');
+          showBannerOnce(evo.emoji + ' ' + evo.name + '!');
+        } else {
+          const u = buildChoices(1)[0];
+          rewards.push(u);
+          const def = u.type === 'weapon' ? WEAPON_DEFS[u.id] : (u.type === 'passive' ? PASSIVE_DEFS[u.id] : u);
+          s.el.textContent = def.emoji || u.emoji;
+          s.el.parentElement.classList.add('stopped');
         }
+        SFX.play('tick');
       }
     });
     if (allStopped) {
       clearInterval(spin);
+      if (_chSpinTimer === spin) _chSpinTimer = null;
       setTimeout(() => {
         let evolvedName = null;
         for (const u of rewards) {
           if (u.type === 'evolve') {
-            G.weapons[u.id].evolved = true;
-            evolvedName = EVOLUTIONS[u.id];
-            showBanner('🌟 ' + WEAPON_DEFS[u.id].name + ' → ' + evolvedName.name + ' 진화!', '#ffd23f');
-            shakeCam(10);
-            // 진화 폭발 파티클
-            const p = G.player;
-            for (let k = 0; k < 40; k++) {
-              const a = Math.random() * TAU;
-              G.particles.push({ x: p.x, y: p.y, vx: Math.cos(a) * rand(150, 480), vy: Math.sin(a) * rand(150, 480), life: rand(0.4, 0.9), maxLife: 0.9, size: rand(3, 7), color: choice(['#ffd23f', '#35f0ff', '#ff5d8f', '#ffffff']), grav: 0 });
+            // 진화 적용 전 만렙 상태 재확인 (연타/중복 오픈 방어)
+            const w2 = G.weapons[u.id];
+            if (w2 && !w2.evolved) {
+              w2.evolved = true;
+              evolvedName = EVOLUTIONS[u.id];
+              showBanner('🌟 ' + WEAPON_DEFS[u.id].name + ' → ' + evolvedName.name + ' 진화!', '#ffd23f');
+              shakeCam(10);
+              // 진화 폭발 파티클
+              const p = G.player;
+              for (let k = 0; k < 40; k++) {
+                const a = Math.random() * TAU;
+                G.particles.push({ x: p.x, y: p.y, vx: Math.cos(a) * rand(150, 480), vy: Math.sin(a) * rand(150, 480), life: rand(0.4, 0.9), maxLife: 0.9, size: rand(3, 7), color: choice(['#ffd23f', '#35f0ff', '#ff5d8f', '#ffffff']), grav: 0 });
+              }
             }
           } else applyUpgrade(u);
         }
@@ -247,12 +260,15 @@ function openChest(val) {
     }
   }, 75);
 
-  document.getElementById('ch-done').onclick = () => {
+  const doneBtn = document.getElementById('ch-done');
+  doneBtn.onclick = () => {
+    // 연타 가드: 상자 UI가 이미 닫혔으면 무시
+    if (G.state !== 'chest') return;
     document.getElementById('overlay-chest').classList.add('hidden');
     document.getElementById('ch-result').textContent = '';
-    if (G.state === 'chest') G.state = 'playing';
+    G.state = 'playing';
     // 상자 중 적립된 레벨업이 있으면 즉시 오픈 (유실 방지)
-    try { if (G.pendingLevelUps > 0 && G.state === 'playing') setTimeout(openLevelUp, 60); } catch (e) {}
+    if (G.pendingLevelUps > 0) setTimeout(() => { if (G.state === 'playing') openLevelUp(); }, 60);
     // 모바일 햅틱
     try { if (navigator.vibrate) navigator.vibrate(20); } catch (e) {}
   };

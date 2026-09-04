@@ -42,7 +42,9 @@ function pickEnemyForBiome(b, tierWeights) {
     const t = ENEMY_TYPES[id];
     if (!t.biomes.includes(b)) continue;
     if (t.special === 'thief') continue; // 도적은 전용 스포너로만
-    pool.push({ id, w: tierWeights[t.tier] || 0.05 });
+    // 가중치 0 = 이 분(티어)엔 스폰 안 함 (기본값 0은 의도치 않은 잡몹 유입 막음)
+    const w = (tierWeights && tierWeights[t.tier]) || 0;
+    if (w > 0) pool.push({ id, w });
   }
   if (!pool.length) pool.push({ id: 'slime', w: 1 });
   let sum = 0; for (const p of pool) sum += p.w;
@@ -146,7 +148,7 @@ function updateSpawns(dt) {
       const b = MapGen.biome(Math.floor(x / TILE), Math.floor(y / TILE));
       spawnEnemy(x, y, pickEnemyForBiome(b, tw), {});
     }
-    showBanner(' 몰려온다!!', '#ff5d5d');
+    showBanner('⚠️ 몰려온다!!', '#ff5d5d');
     SFX.play('boss');
     shakeCam(6);
   }
@@ -236,8 +238,10 @@ function buildSpatialHash() {
 function queryEnemies(x, y, r) {
   const cell = 110;
   const out = [];
-  const x0 = ((x - r) / cell) | 0, x1 = ((x + r) / cell) | 0;
-  const y0 = ((y - r) / cell) | 0, y1 = ((y + r) / cell) | 0;
+  // 조회 반경에 여유를 두어 큰 적(보스/골렘)이 중심점이 셀 밖이라고 누락되지 않게
+  const pad = r + 40;
+  const x0 = ((x - pad) / cell) | 0, x1 = ((x + pad) / cell) | 0;
+  const y0 = ((y - pad) / cell) | 0, y1 = ((y + pad) / cell) | 0;
   const r2 = r * r;
   for (let cy = y0; cy <= y1; cy++) {
     for (let cx = x0; cx <= x1; cx++) {
@@ -451,7 +455,8 @@ function updateEnemies(dt) {
               const a = (k / n) * TAU;
               const sx = e.x + Math.cos(a) * 90, sy = e.y + Math.sin(a) * 90;
               const b = MapGen.biome(Math.floor(sx / TILE), Math.floor(sy / TILE));
-              const m2 = spawnEnemy(sx, sy, pickEnemyForBiome(b, { 1: 0, 2: 10, 3: 6, 4: m > 8 ? 2 : 0 }), {});
+              const tierW = { 1: 0, 2: 10, 3: 6, 4: G.minute > 8 ? 2 : 0 };
+              const m2 = spawnEnemy(sx, sy, pickEnemyForBiome(b, tierW), {});
               m2.spawnT = 0.4;
               shardBurst(sx, sy, e.color, 8, 200, 4);
             }
@@ -506,9 +511,13 @@ function updateEnemies(dt) {
       if (G.passives.thorns > 0 && !e.boss) {
         damageEnemy(e, 10 + G.passives.thorns * 9, true, null);
       }
-      // 넉백
-      const d = Math.sqrt(pd) || 1;
-      e.x -= (p.x - e.x) / d * 18; e.y -= (p.y - e.y) / d * 18;
+      // 넉백 (도적은 접촉해도 밀리지 않게 — 젬 자루 사냥 난이도 보호)
+      if (e.type !== 'thief') {
+        const d = Math.sqrt(pd) || 1;
+        e.x -= (p.x - e.x) / d * 18; e.y -= (p.y - e.y) / d * 18;
+      }
+      // 러시 중 접촉한 적은 타격당한 것으로 간주 (콤보 유지)
+      if (G.rage.active) addCombo();
     }
   }
 
@@ -629,12 +638,19 @@ function killEnemy(e) {
     showBanner(e.boss ? '💎 보물 상자 등장!' : '💎 상자 드롭!', '#ffd23f');
   }
 
-  // 젬 수 상한 병합
+  // 젬 수 상한 병합 (kind 불변: 젬은 젬끼리만 합친다 — 하트/상자 오염 방지)
   if (G.pickups.length > 380) {
     let merged = 0;
-    for (let i = 0; i < G.pickups.length && merged < 60; i++) {
-      const p = G.pickups[i];
-      if (p.kind === 'gem') { G.pickups.splice(i, 1); G.pickups[randi(0, G.pickups.length - 1)].val += p.val; merged++; i--; }
+    const gems = G.pickups.filter(pk => pk.kind === 'gem');
+    for (let gi = gems.length - 1; gi >= 0 && merged < 60; gi--) {
+      const p = gems[gi];
+      const idx = G.pickups.indexOf(p);
+      if (idx < 0) continue;
+      G.pickups.splice(idx, 1);
+      const tgt = gems[(Math.random() * gems.length) | 0];
+      if (tgt && tgt !== p && G.pickups.includes(tgt)) tgt.val += p.val;
+      else G.pickups.push(p); // 대상이 이미 제거됐으면 되돌려 유실 방지
+      merged++;
     }
   }
 

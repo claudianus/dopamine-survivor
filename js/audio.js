@@ -13,7 +13,7 @@ const SFX = {
   musicBus: null, // 음악 게인
   verb: null,     // 컨볼버 리버브 (생성 IR)
   samples: {},    // 디코딩된 샘플 캐시
-  muted: localStorage.getItem('ds_mute') === '1',
+  muted: lsGet('ds_mute') === '1',
 
   /* 샘플 매핑: 게임 사운드 → 에셋 파일 (없으면 신스 폴백) */
   SAMPLE_FILES: {
@@ -142,13 +142,13 @@ const SFX = {
 
   setMuted(m) {
     this.muted = m;
-    localStorage.setItem('ds_mute', m ? '1' : '0');
+    lsSet('ds_mute', m ? '1' : '0');
     if (this.master) this.master.gain.value = m ? 0 : 0.92;
   },
 
   /* 위치 → 패닝 (-0.8 ~ 0.8) */
   pan(x) {
-    if (x === undefined || !G.player) return null;
+    if (x === undefined || !this.ctx || !G.player) return null;
     const v = clamp((x - G.player.x) / 650, -0.85, 0.85);
     if (Math.abs(v) < 0.05) return null;
     const p = this.ctx.createStereoPanner ? this.ctx.createStereoPanner() : null;
@@ -182,7 +182,8 @@ const SFX = {
     // 과도한 동시 노이즈로 인한 CPU 폭주 방지 (최대 12개)
     this._noiseCount = (this._noiseCount || 0) + 1;
     if (this._noiseCount > 12) { this._noiseCount--; return; }
-    setTimeout(() => { this._noiseCount = Math.max(0, (this._noiseCount || 1) - 1); }, dur * 1000 + 60);
+    // 카운트 해제는 실제 재생 종료 시각(delay 포함) 기준 — 일찍 풀려 재입장 폭주 방지
+    setTimeout(() => { this._noiseCount = Math.max(0, (this._noiseCount || 1) - 1); }, (dur + delay) * 1000 + 60);
     const t0 = this.ctx.currentTime + delay;
     const need = Math.max(1, (1.0 * this.ctx.sampleRate) | 0);
     if (!this._noiseBuf || this._noiseBufLen !== need) {

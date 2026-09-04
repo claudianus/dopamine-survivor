@@ -269,11 +269,12 @@ function fireWeapon(id, lv, dmgM) {
     case 'boomerang': {
       for (let i = 0; i < lv.count; i++) {
         const t = nearestTarget(p.x, p.y, 700);
-        const a = t ? ang(p.x, p.y, t.x, t.y) : Math.random() * TAU;
+        // 타깃이 없어도 플레이어가 마지막으로 바라본 방향으로 던진다 (화면 밖 유실 방지)
+        const a = t ? ang(p.x, p.y, t.x, t.y) : Math.atan2(p.faceY, p.faceX) + rand(-0.5, 0.5);
         G.projectiles.push({
           kind: 'boomerang', x: p.x, y: p.y,
           vx: Math.cos(a) * lv.spd, vy: Math.sin(a) * lv.spd,
-          r: lv.split ? 17 : 14, dmg: lv.dmg * dmgM, life: 5,
+          r: lv.split ? 17 : 14, dmg: lv.dmg * dmgM, life: 4.5,
           phase: 'out', dist: 0, range: lv.range, spd: lv.spd,
           spin: 0, hitSet: new Map(), color: WEAPON_DEFS.boomerang.color,
           split: lv.split || false, isMini: false,
@@ -395,11 +396,13 @@ function strikeLightning(x, y, lv, dmgM, chained) {
 function updateProjectiles(dt) {
   const p = G.player;
   for (let i = G.projectiles.length - 1; i >= 0; i--) {
-    const b = G.projectiles[i];
-    b.life -= dt;
+  const b = G.projectiles[i];
+  // 공통 수명 감소 — t 기반 무기(smite/meteor/grenade)의 폭발 시점은 dur이 결정하므로
+  // 여기서만 감소한다 (이중 감소 시 폭발 전에 소멸하는 버그의 원인이 되었음)
+  b.life -= dt;
 
-    if (b.kind === 'bolt') {
-      // 경미한 유도 (적·결정 모두 추적)
+  if (b.kind === 'bolt') {
+    // 경미한 유도 (적·결정 모두 추적)
       if (b.target && (G.enemies.includes(b.target) || G.crystals.includes(b.target))) {
         const cur = Math.atan2(b.vy, b.vx);
         const want = ang(b.x, b.y, b.target.x, b.target.y);
@@ -560,7 +563,6 @@ function updateProjectiles(dt) {
     }
     else if (b.kind === 'meteor') {
       b.t += dt;
-      b.life -= dt;
       if (b.t >= b.dur) {
         G.projectiles.splice(i, 1);
         SFX.play('boom', b.tx);
@@ -578,7 +580,6 @@ function updateProjectiles(dt) {
     }
     else if (b.kind === 'smite') {
       b.t += dt;
-      b.life -= dt;
       if (b.t >= b.dur) {
         // 강타!
         G.projectiles.splice(i, 1);
@@ -614,10 +615,10 @@ function updateProjectiles(dt) {
     const vo = G.vortices[vi];
     vo.life -= dt;
     if (vo.life <= 0) { G.vortices.splice(vi, 1); continue; }
-    // 강력 흡인
+    // 강력 흡인 (흡입 범위는 소용돌이 중심 기준 — r 패딩: 큰 적도 빨려들게)
     for (const e of G.enemies) {
       const d = dist(e.x, e.y, vo.x, vo.y);
-      if (d < vo.r * 2.2 && d > 4) {
+      if (d < vo.r * 2.2 + e.r && d > 4) {
         e.x += (vo.x - e.x) / d * vo.pull * dt;
         e.y += (vo.y - e.y) / d * vo.pull * dt;
       }

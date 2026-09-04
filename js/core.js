@@ -19,6 +19,10 @@ function rand(a = 1, b) {
 function randi(a, b) { return Math.floor(rand(a, b + 1)); }
 function choice(arr) { return arr[(Math.random() * arr.length) | 0]; }
 
+/* localStorage 래퍼 — 사파리 프라이빗 모드 등 접근 예외 환경에서도 게임이 죽지 않게 */
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
 /* 시드 기반 RNG (Mulberry32) */
 function Mulberry32(seed) {
   let a = seed >>> 0;
@@ -134,7 +138,7 @@ const QUALITY = {
     // 고해상도 데스크탑은 고품질 유지
     if (!mobile && Math.min(window.innerWidth, window.innerHeight) >= 700 && cores > 4) this.level = 2;
     try {
-      const saved = localStorage.getItem('ds_quality');
+      const saved = lsGet('ds_quality');
       if (saved === '0' || saved === '1' || saved === '2') this.level = parseInt(saved, 10);
     } catch (e) {}
     this.applyDprCap();
@@ -157,7 +161,7 @@ const QUALITY = {
     this.level = lv;
     this.lastSwitch = performance.now();
     this.applyDprCap();
-    try { localStorage.setItem('ds_quality', String(lv)); } catch (e) {}
+    lsSet('ds_quality', String(lv));
     if (typeof resize === 'function') { try { resize(); } catch (e) {} }
   },
   get maxParticles() { return this.level === 0 ? 320 : (this.level === 1 ? 500 : 700); },
@@ -167,6 +171,7 @@ const QUALITY = {
   get streakOn() { return this.level >= 1; },
   get dustOn() { return this.level >= 1; },
   get rimOn() { return this.level >= 1; },
+  get grainOn() { return this.level >= 1; },
 };
 
 /* ============================================================
