@@ -340,7 +340,8 @@ function updateEnemies(dt) {
           sp = 0;
         } else {
           e.restT = (e.restT || 0) - dt;
-          if (d < 300 && e.restT <= 0) { e.chargeState = 'telegraph'; e.tele = 0.7; SFX.play('charge'); }
+          // 조준 텔레그래프 사운드는 가까이 있을 때만 (화면 밖 원거리 꾸르륵 소음 방지)
+          if (d < 300 && e.restT <= 0) { e.chargeState = 'telegraph'; e.tele = 0.7; if (d < 220) SFX.play('charge'); }
         }
       }
 

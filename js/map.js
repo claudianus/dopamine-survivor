@@ -57,10 +57,12 @@ const MapGen = {
       if (this.biomeCache.size > 20000) this.biomeCache.clear();
       return hit;
     }
-    const e = this.nE.noise2D(tx / 34, ty / 34) * 0.5 + 0.5;         // 고도
-    const m = this.nM.noise2D(tx / 26, ty / 26) * 0.5 + 0.5;         // 습도
-    const t = this.nT.noise2D(tx / 60, ty / 60) * 0.5 + 0.5;         // 기온
-    const c = this.nC.noise2D(tx / 22, ty / 22) * 0.5 + 0.5;         // 크리스탈
+    // 스케일 2배 와이드 (2026-09 튜닝): 이전 값(/34, /26, /60)에선 13초 이동에
+    // 최대 9개 바이옴을 지나 '발견 보상'이 남발했다. 지역=지역답게.
+    const e = this.nE.noise2D(tx / 68, ty / 68) * 0.5 + 0.5;         // 고도
+    const m = this.nM.noise2D(tx / 52, ty / 52) * 0.5 + 0.5;         // 습도
+    const t = this.nT.noise2D(tx / 120, ty / 120) * 0.5 + 0.5;       // 기온
+    const c = this.nC.noise2D(tx / 44, ty / 44) * 0.5 + 0.5;         // 크리스탈
 
     let b;
     if (e < 0.26) b = B_WATER;

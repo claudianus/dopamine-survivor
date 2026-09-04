@@ -281,7 +281,7 @@ const SFX = {
         this.tone(185, 0.26, 'square', 0.3, -24); this.tone(185, 0.26, 'square', 0.3, -24, 0.34);
         this.tone(93, 0.6, 'sawtooth', 0.16, -10, 0.02);
         break;
-      case 'charge':  this.tone(140, 0.6, 'sawtooth', 0.2, 380, 0, P); break;
+      case 'charge':  if (this.throttle('charge', 350)) { this.tone(140, 0.6, 'sawtooth', 0.2, 380, 0, P); this.noise(0.5, 0.08, 300, 0, P); } break; // 스로틀: 여러 돌진러가 동시에 울려 저음 꾸르륵 겹침 방지
       case 'ragehit': this.tone(260, 0.09, 'sawtooth', 0.16, 560, 0, P); break;
       case 'portal':  this.tone(90, 0.4, 'sine', 0.14, 60, 0, P); this.noise(0.35, 0.1, 500, 0, P); break;
       /* ===== 🎰 카지노 도파민 패밀리 ===== */

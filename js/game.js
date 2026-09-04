@@ -887,27 +887,33 @@ function updatePlayer(dt) {
   /* 지형 속도 물리: 지형별 가속/마찰 (빙판 드리프트!) */
   const props = MapGen.groundProps(p.x, p.y);
   // 지역 발견: 새 바이옴 첫 진입 → 즉시 탐험 보상 (이동의 잔돈)
+  // 완충: 첫 45초는 '정찰 시간' — 스폰 직후 스치는 이동만으로 보상이 터지지 않게
   if (!G.visitedBiomes.has(props.biome)) {
+    const isScout = G.time < 45; // 첫 발견 3~4개는 그냥 월드 소개로
     G.visitedBiomes.add(props.biome);
     G.stats.regions = G.visitedBiomes.size;
     const n = G.visitedBiomes.size, m = G.minute;
-    // 젬은 잔돈만 (초반 레벨 곡선 보호: 첫 발견 ≈ 1레벨 이하)
-    const cnt = 3 + ((m * 0.5) | 0);
-    for (let i = 0; i < cnt; i++) {
-      const a = Math.random() * TAU;
-      G.pickups.push({ kind: 'gem', x: p.x, y: p.y, val: choice([1, 1, 2]), t: Math.random() * TAU, vx: Math.cos(a) * rand(150, 320), vy: Math.sin(a) * rand(150, 320) });
+    if (!isScout) {
+      // 젬은 잔돈만 (초반 레벨 곡선 보호: 첫 발견 ≈ 1레벨 이하)
+      const cnt = 3 + ((m * 0.5) | 0);
+      for (let i = 0; i < cnt; i++) {
+        const a = Math.random() * TAU;
+        G.pickups.push({ kind: 'gem', x: p.x, y: p.y, val: choice([1, 1, 2]), t: Math.random() * TAU, vx: Math.cos(a) * rand(150, 320), vy: Math.sin(a) * rand(150, 320) });
+      }
+      G.rage.value = Math.min(G.rage.max, G.rage.value + 25);
+      p.hp = Math.min(p.maxHp, p.hp + p.maxHp * 0.1);
+      POST.triggerFlash(0.06);
     }
-    G.rage.value = Math.min(G.rage.max, G.rage.value + 25);
-    p.hp = Math.min(p.maxHp, p.hp + p.maxHp * 0.1);
     SFX.play('chest');
-    POST.triggerFlash(0.06);
-    if (n % 3 === 0) {
+    if (!isScout && n % 3 === 0) {
       G.pickups.push({ kind: 'chest', x: p.x + rand(-60, 60), y: p.y + rand(-60, 60), val: 3, t: 0, vx: 0, vy: 0 });
       showBanner('🗺️ 새 지역 발견: ' + BIOME_INFO[props.biome].name + '! 상자 보너스!', '#ffd23f');
+    } else if (isScout) {
+      showBanner('🗺️ ' + BIOME_INFO[props.biome].name, 'rgba(160,180,205,0.7)'); // 정찰: 조용한 안내
     } else {
       showBanner('🗺️ 새 지역 발견: ' + BIOME_INFO[props.biome].name + ' (+보상!)', '#4de3ff');
     }
-    try { if (G.vibrate) G.vibrate(20); } catch (e) {}
+    try { if (!isScout && G.vibrate) G.vibrate(20); } catch (e) {}
   }
   const rushMul = G.rage.active ? 1.3 : 1;
   let desX = 0, desY = 0;
