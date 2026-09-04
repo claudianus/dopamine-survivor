@@ -895,6 +895,10 @@ function drawProjectiles(ctx) {
       // 발광
       Glow.draw(ctx, boltCol, b.x, b.y, b.r * 3.2, 0.75);
       ctx.globalCompositeOperation = 'source-over';
+      // 다크 링 → 흰 코어: 밝은 지형(설원)의 흰 배경에서도 탄환 형태가 유지된다
+      ctx.strokeStyle = 'rgba(8,12,22,0.6)';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.5 + 0.8, 0, TAU); ctx.stroke();
       ctx.fillStyle = '#ffffff';
       ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.5, 0, TAU); ctx.fill();
     }

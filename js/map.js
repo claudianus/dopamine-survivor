@@ -17,7 +17,7 @@ const BIOME_INFO = {
   [B_SAND]:    { name: '해변',   base: [226, 180, 116], spd: 1.0 },
   [B_GRASS]:   { name: '초원',   base: [74, 172, 98],   spd: 1.0 },
   [B_FOREST]:  { name: '흑림',   base: [46, 126, 76],   spd: 0.95 },
-  [B_SNOW]:    { name: '설원',   base: [210, 226, 250], spd: 1.0 },
+  [B_SNOW]:    { name: '설원',   base: [198, 214, 238], spd: 1.0 }, // 톤다운: 이전 210,226,250 — 흰 배경에서 이펙트 포화/가독성 문제
   [B_DESERT]:  { name: '사막',   base: [214, 140, 76], spd: 1.0 },
   [B_VOLCANIC]:{ name: '화산지대', base: [78, 46, 52], spd: 1.0 },
   [B_CRYSTAL]: { name: '도파민 광산', base: [108, 64, 196], spd: 1.0 },
@@ -151,15 +151,22 @@ const MapGen = {
         ctx.stroke();
         break;
       case 'ice':
-        ctx.fillStyle = 'rgba(185,228,255,0.4)';
+        // 블루-그레이 얼음판: 하늘색+흰 하이라이트 조합은 눈 배경에서 빙판과 눈이 구분 안 됨
+        ctx.fillStyle = 'rgba(148,176,208,0.4)';
         ctx.fillRect(px, py, TILE, TILE);
-        ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+        ctx.strokeStyle = 'rgba(235,245,255,0.5)';
         ctx.lineWidth = 1.4;
         ctx.beginPath();
         ctx.moveTo(px + h * 40, py + 6); ctx.lineTo(px + 20 + h * 20, py + 36); ctx.lineTo(px + 30, py + 60);
         ctx.moveTo(px + 8, py + h * 50); ctx.lineTo(px + 44, py + 20 + h * 20);
         ctx.stroke();
-        ctx.fillStyle = 'rgba(255,255,255,0.18)';
+        // 균열 하이라이트 — 다크 엣지로 어떤 배경에서도 빙판 형태 유지
+        ctx.strokeStyle = 'rgba(90,120,158,0.35)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(px + 12, py + 14 + h * 20); ctx.lineTo(px + 48, py + 30 + h * 16);
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255,255,255,0.14)';
         ctx.beginPath();
         ctx.moveTo(px + h * 30, py); ctx.lineTo(px + h * 30 + 26, py); ctx.lineTo(px + h * 30 - 12, py + TILE);
         ctx.closePath(); ctx.fill();
@@ -198,6 +205,12 @@ const MapGen = {
 
   isLava(x, y) {
     return this.biome(Math.floor(x / TILE), Math.floor(y / TILE)) === B_LAVA;
+  },
+
+  /* 밝은 지형(설원·해변) 판정 — 이펙트 가독성 보정(라이트맵 톤다운/아웃라인 강화)의 트리거 */
+  isBrightBiome(x, y) {
+    const b = this.biome(Math.floor(x / TILE), Math.floor(y / TILE));
+    return b === B_SNOW || b === B_SAND;
   },
 
   /* 청크 생성 (오프스크린 캔버스에 지형 + 장식을 한 번만 그림) */

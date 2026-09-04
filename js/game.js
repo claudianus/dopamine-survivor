@@ -475,11 +475,15 @@ const LIGHTS = {
     }
 
     // 주변광(앰비언트): 밤이 어두워지고, 러시 시 따뜻해짐
+    // 밝은 지형(설원·해변) 톤다운: 흰 배경 위에선 lighter 이펙트가 255로 포화돼
+    // 색이 뭉개지므로 무대를 어둡게 깔아 이펙트-배경 대비를 회복한다
     const day = G.dayTint || 0;
+    const bright = MapGen.isBrightBiome(p.x, p.y);
+    const bdim = bright ? 0.78 : 1; // 밝은 지형: 앰비언트 22% 다운
     const amb = [
-      Math.round(lerp(lerp(185, 148, day), 196, rushOn ? 0.4 : 0)),
-      Math.round(lerp(lerp(190, 158, day), 165, rushOn ? 0.4 : 0)),
-      Math.round(lerp(lerp(205, 180, day), 185, rushOn ? 0.4 : 0)),
+      Math.round(lerp(lerp(185, 148, day), 196, rushOn ? 0.4 : 0) * bdim),
+      Math.round(lerp(lerp(190, 158, day), 165, rushOn ? 0.4 : 0) * bdim),
+      Math.round(lerp(lerp(205, 180, day), 185, rushOn ? 0.4 : 0) * bdim),
     ];
     lc.setTransform(1, 0, 0, 1, 0, 0);
     lc.globalCompositeOperation = 'source-over';
@@ -1337,6 +1341,11 @@ function render(dt = 1 / 60) {
 
   // 피해 텍스트 (컬링 + 폰트 캐시)
   ctx.textAlign = 'center';
+  // 밝은 지형(설원·해변)에서는 텍스트 윤곽을 더 진하게 — 흰 배경에 흰 텍스트 뭉개짐 방지
+  const brightTerrain = MapGen.isBrightBiome(G.player.x, G.player.y);
+  const txtOutlineW = brightTerrain ? 4.5 : 3.5;
+  const txtOutlineCol = brightTerrain ? 'rgba(10,14,24,0.85)' : 'rgba(0,0,0,0.7)';
+  const txtNormal = brightTerrain ? '#c9d4e6' : '#dfe6f2'; // 일반 데미지: 밝은 지형에선 살짝 톤다운
   for (const t of G.dmgTexts) {
     if (t.x < vL - 60 || t.x > vR + 60 || t.y < vT - 60 || t.y > vB + 60) continue;
     const a = clamp(t.life / t.maxLife, 0, 1);
@@ -1345,8 +1354,8 @@ function render(dt = 1 / 60) {
     // 폰트 문자열 생성 비용 절약: 정수 크기 버킷 캐시
     const fs = Math.round(17 * pop);
     ctx.font = fontCache[fs] || (fontCache[fs] = `900 ${fs}px 'Segoe UI',sans-serif`);
-    ctx.lineWidth = 3.5;
-    ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+    ctx.lineWidth = txtOutlineW;
+    ctx.strokeStyle = txtOutlineCol;
     if (t.isPlayer) {
       ctx.fillStyle = '#ff3b5c';
       ctx.strokeText('-' + t.val, t.x, t.y);
@@ -1356,7 +1365,7 @@ function render(dt = 1 / 60) {
       ctx.strokeText(t.val + '!', t.x, t.y);
       ctx.fillText(t.val + '!', t.x, t.y);
     } else {
-      ctx.fillStyle = '#dfe6f2';
+      ctx.fillStyle = txtNormal;
       ctx.strokeText(t.val, t.x, t.y);
       ctx.fillText(t.val, t.x, t.y);
     }
@@ -1527,10 +1536,13 @@ function drawPickup(pk) {
       Glow.draw(ctx, c, 0, 0, s * 2.6, 0.55);
       ctx.globalCompositeOperation = 'source-over';
       ctx.rotate(pk.t * 0.6);
+      // 다크 아웃라인 → 밝은 지형(설원) 흰 배경에서도 젬 형태 유지
+      ctx.strokeStyle = 'rgba(8,12,22,0.75)';
+      ctx.lineWidth = 1.6;
       ctx.fillStyle = c;
       ctx.beginPath();
       ctx.moveTo(0, -s); ctx.lineTo(s * 0.68, 0); ctx.lineTo(0, s); ctx.lineTo(-s * 0.68, 0);
-      ctx.closePath(); ctx.fill();
+      ctx.closePath(); ctx.fill(); ctx.stroke();
       ctx.strokeStyle = 'rgba(255,255,255,0.7)';
       ctx.lineWidth = 1;
       ctx.stroke();
@@ -1545,8 +1557,10 @@ function drawPickup(pk) {
       ctx.globalCompositeOperation = 'lighter';
       Glow.draw(ctx, '#ff3b5c', 0, 0, 20 + Math.sin(pk.t * 1.4) * 3, 0.6);
       ctx.globalCompositeOperation = 'source-over';
+      ctx.strokeStyle = 'rgba(8,12,22,0.6)';
+      ctx.lineWidth = 1.5;
       ctx.fillStyle = '#ff3b5c';
-      ctx.beginPath(); ctx.arc(0, 0, 6.5, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(0, 0, 6.5, 0, TAU); ctx.fill(); ctx.stroke();
       ctx.fillStyle = 'rgba(255,255,255,0.75)';
       ctx.beginPath(); ctx.arc(-2, -2.2, 2, 0, TAU); ctx.fill();
       // 궤도 링
