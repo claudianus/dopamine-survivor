@@ -690,6 +690,21 @@ function drawMenaceEyes(ctx, x, y, r, glowColor, dirX) {
   ctx.restore();
 }
 
+/* 적 발광 프리패스 — render()가 'lighter' 단일 블럭으로 일괄 호출.
+ * 적마다 lighter→source-over를 왕복하던 파이프라인 플러시를 N회→1회로 제거.
+ * 호출 전 컬링·가시 플래그(e._vis) 판정은 호출부에서 수행. */
+function drawEnemyGlow(ctx, e) {
+  if (e.spawnT > 0) {
+    const t = 1 - e.spawnT / 0.5;
+    Glow.draw(ctx, e.color, e.x, e.y + e.r * 0.5, e.r * 1.5 * (1 - t * 0.4), 0.35 * (1 - t));
+  }
+  if (e.elite || e.boss) {
+    Glow.draw(ctx, e.boss ? '#ff2d4e' : '#ffaa2d', e.x, e.y, e.r * 2.1, 0.4 + Math.sin(e.wobble * 1.4) * 0.12);
+  } else {
+    Glow.draw(ctx, e.color, e.x, e.y, e.r * 1.7, 0.16);
+  }
+}
+
 function drawEnemy(ctx, e) {
   const p = G.player;
   const dx = p.x - e.x;
@@ -702,16 +717,13 @@ function drawEnemy(ctx, e) {
   ctx.save();
   ctx.translate(e.x, e.y);
 
-  // 스폰 포탈: 어둠에서 솟아오르는 연출
+  // 스폰 포탈: 어둠에서 솟아오르는 연출 (발광은 프리패스에서 처리)
   if (spawning) {
     const t = 1 - e.spawnT / 0.5; // 0→1
     ctx.globalAlpha = 0.7;
     ctx.strokeStyle = glowCol;
     ctx.lineWidth = 2.5;
     ctx.beginPath(); ctx.ellipse(0, e.r * 0.7, e.r * (1.7 - t * 0.7), e.r * (0.55 - t * 0.2), 0, 0, TAU); ctx.stroke();
-    ctx.globalCompositeOperation = 'lighter';
-    Glow.draw(ctx, glowCol, 0, e.r * 0.5, e.r * 1.5 * (1 - t * 0.4), 0.35 * (1 - t));
-    ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;
     ctx.scale(spawnScale, spawnScale);
   }
@@ -720,19 +732,11 @@ function drawEnemy(ctx, e) {
   ctx.fillStyle = 'rgba(0,0,0,0.38)';
   ctx.beginPath(); ctx.ellipse(0, e.r * 0.8, e.r * 0.85, e.r * 0.3, 0, 0, TAU); ctx.fill();
 
-  // 엘리트/보스 오라
+  // 엘리트/보스 오라 링 (발광은 프리패스에서 처리)
   if (e.elite || e.boss) {
-    ctx.globalCompositeOperation = 'lighter';
-    Glow.draw(ctx, e.boss ? '#ff2d4e' : '#ffaa2d', 0, 0, e.r * 2.1, 0.4 + Math.sin(e.wobble * 1.4) * 0.12);
-    ctx.globalCompositeOperation = 'source-over';
     ctx.strokeStyle = e.boss ? 'rgba(255,45,78,0.75)' : 'rgba(255,170,45,0.8)';
     ctx.lineWidth = 2.4;
     ctx.beginPath(); ctx.arc(0, 0, e.r + 6 + Math.sin(e.wobble * 1.4) * 2, 0, TAU); ctx.stroke();
-  } else {
-    // 일반 적 은은한 발광
-    ctx.globalCompositeOperation = 'lighter';
-    Glow.draw(ctx, glowCol, 0, 0, e.r * 1.7, 0.16);
-    ctx.globalCompositeOperation = 'source-over';
   }
 
   ctx.scale(1 / squash, squash);
@@ -1184,8 +1188,10 @@ function updateHazards(dt) {
 }
 
 function drawHazards(ctx) {
+  const [hL, hT, hR, hB] = viewRect(0);
   // 탄력 버섯
   for (const b of G.bouncers) {
+    if (b.x < hL - 60 || b.x > hR + 60 || b.y < hT - 60 || b.y > hB + 60) continue;
     const sq = 1 - b.squash * 0.45;
     ctx.save();
     ctx.translate(b.x, b.y);
@@ -1210,6 +1216,7 @@ function drawHazards(ctx) {
 
   // 폭발성 결정 (위험 예고로 붉게 맥동)
   for (const v of G.volatiles) {
+    if (v.x < hL - 70 || v.x > hR + 70 || v.y < hT - 70 || v.y > hB + 70) continue;
     const armed = v.fuse > 0;
     const pulse = armed ? 1 + Math.sin(v.t * 8) * 0.3 : 1 + Math.sin(v.t) * 0.1;
     ctx.save();
@@ -1233,6 +1240,7 @@ function drawHazards(ctx) {
 
   // 간헐천
   for (const gh of G.geysers) {
+    if (gh.x < hL - 260 || gh.x > hR + 260 || gh.y < hT - 260 || gh.y > hB + 260) continue;
     ctx.save();
     ctx.translate(gh.x, gh.y);
     // 분출구

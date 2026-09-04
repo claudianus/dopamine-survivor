@@ -439,6 +439,40 @@ const MapGen = {
     }
   },
 
+  /* 안개 레이어 캐싱 — r 300~600짜리 대형 글로우 8개를 매 프레임 풀해상도로
+   * 그리는 대신 0.5배 오프스크린에 수 프레임마다 한 번만 렌더 후 blit.
+   * 안개는 느리게 drift하므로 2~4프레임 staleness가 시각적으로 동일. */
+  fogBack: null, fogFront: null,
+  fogCX: 1e12, fogCY: 1e12, fogFrame: -9999, fogVW: 0, fogVH: 0,
+  renderFogLayers(camX, camY, vw, vh, zoom) {
+    const FQ = 0.5;
+    const q = (typeof QUALITY !== 'undefined') ? QUALITY.level : 2;
+    const interval = q === 0 ? 4 : (q === 1 ? 3 : 2);
+    const moved = Math.abs(camX - this.fogCX) + Math.abs(camY - this.fogCY);
+    const resized = !this.fogBack || !this.fogFront || Math.abs(vw - this.fogVW) > 4 || Math.abs(vh - this.fogVH) > 4;
+    const fr = G.frame || 0;
+    if (!resized && (fr - this.fogFrame) < interval && moved < 30) return;
+    this.fogFrame = fr; this.fogCX = camX; this.fogCY = camY; this.fogVW = vw; this.fogVH = vh;
+    const w = Math.max(2, Math.ceil(vw * FQ)), h = Math.max(2, Math.ceil(vh * FQ));
+    for (const layer of [0, 1]) {
+      let cv = layer === 0 ? this.fogBack : this.fogFront;
+      if (!cv) { cv = document.createElement('canvas'); if (layer === 0) this.fogBack = cv; else this.fogFront = cv; }
+      if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+      const fx = cv.getContext('2d');
+      fx.setTransform(FQ * zoom, 0, 0, FQ * zoom, -camX * FQ * zoom, -camY * FQ * zoom);
+      fx.clearRect(camX - 2, camY - 2, vw + 4, vh + 4);
+      for (const f of this.fog) {
+        if (f.layer !== layer) continue;
+        Glow.draw(fx, 'hsl(220,30%,62%)', f.x, f.y, f.r, f.a);
+      }
+    }
+  },
+  blitFog(ctx, layer, camX, camY, vw, vh) {
+    const cv = layer === 0 ? this.fogBack : this.fogFront;
+    if (!cv || !cv.width) return;
+    ctx.drawImage(cv, camX, camY, vw, vh);
+  },
+
   /* 미니맵: 주변 바이옴 + 엔티티 점 (품질별 캐시 0.7s/1.0s/1.4s, 저사양 4px 스텝) */
   drawMinimap(mctx, W, px, py, enemies, boss) {
     const now = performance.now();

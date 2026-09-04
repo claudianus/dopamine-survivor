@@ -140,8 +140,8 @@ const QUALITY = {
     this.applyDprCap();
   },
   applyDprCap() {
-    // 저사양은 DPR을 낮춰 필레이트 병목을 제거
-    this.dprCap = this.level === 0 ? 1.25 : (this.level === 1 ? 1.6 : 2);
+    // 저사양은 DPR을 낮춰 필레이트 병목을 제거 (1.0 = CSS 픽셀 그대로)
+    this.dprCap = this.level === 0 ? 1 : (this.level === 1 ? 1.6 : 2);
   },
   // 매 프레임 FPS를 추적해 자동 승/강급 (0.5초 쿨다운, 타이틀 제외)
   track(dt) {
@@ -234,6 +234,13 @@ const Glow = {
     ctx.globalAlpha = prev;
   },
 };
+
+/* 뷰 컬링: 화면 밖 엔티티의 드로우콜을 원천 차단 (화면상 동일, GPU 부하만 제거) */
+function viewRect(m) {
+  const cam = G.camera, z = G.zoom || 1;
+  const vw = G.view.w / z, vh = G.view.h / z;
+  return [cam.x - m, cam.y - m, cam.x + vw + m, cam.y + vh + m];
+}
 
 /* 파편(삼각형) 파티클 생성 */
 function shardBurst(x, y, color, n, speed = 260, size = 5) {

@@ -541,6 +541,10 @@ body.rush #game { filter: saturate(1.45) contrast(1.07); }
 /* 품질 버튼 (HUD) */
 #qualityBtn { bottom: 98px; right: 10px; }
 
+/* 전체화면 버튼 (HUD) */
+#fsBtn { bottom: 142px; right: 10px; }
+.iconbtn { touch-action: manipulation; }
+
 /* 모바일 */
 @media (max-width: 720px) {
   #timer { font-size: 20px; letter-spacing: 3px; }
@@ -554,6 +558,7 @@ body.rush #game { filter: saturate(1.45) contrast(1.07); }
   #muteBtn { bottom: auto; top: calc(16px + env(safe-area-inset-top, 0px)); right: calc(10px + env(safe-area-inset-right, 0px)); }
   #pauseBtn { bottom: auto; top: calc(60px + env(safe-area-inset-top, 0px)); right: calc(10px + env(safe-area-inset-right, 0px)); }
   #qualityBtn { bottom: auto; top: calc(104px + env(safe-area-inset-top, 0px)); right: calc(10px + env(safe-area-inset-right, 0px)); }
+  #fsBtn { bottom: auto; top: calc(148px + env(safe-area-inset-top, 0px)); right: calc(10px + env(safe-area-inset-right, 0px)); }
   #rageBtn {
     right: calc(10px + env(safe-area-inset-right, 0px));
     bottom: calc(150px + env(safe-area-inset-bottom, 0px));

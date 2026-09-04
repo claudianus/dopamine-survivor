@@ -277,18 +277,19 @@ const POST = {
       outCtx.globalCompositeOperation = 'source-over';
     }
 
-    /* 필름 그레인 — 저사양 스킵, 중사양은 2프레임당 1회 */
+    /* 필름 그레인 — 160px 타일을 화면 전체에 80여 회 blit 대신
+     * repeat 패턴 1회 fill로 대체 (동일한 셰이더 결과, 드로우콜 1/80) */
     if (QUALITY.grainOn && (qLevel >= 2 || ((G.frame || 0) % 2 === 0))) {
-      outCtx.globalCompositeOperation = 'overlay';
-      outCtx.globalAlpha = 0.038;
-      const gx = -Math.random() * 160, gy = -Math.random() * 160;
-      for (let ty2 = gy; ty2 < H; ty2 += 160) {
-        for (let tx2 = gx; tx2 < W; tx2 += 160) {
-          outCtx.drawImage(this.grain, tx2, ty2);
-        }
+      if (!this._grainPat) { try { this._grainPat = outCtx.createPattern(this.grain, 'repeat'); } catch (e) {} }
+      if (this._grainPat) {
+        outCtx.save();
+        outCtx.globalCompositeOperation = 'overlay';
+        outCtx.globalAlpha = 0.038;
+        outCtx.translate(-((Math.random() * 160) | 0), -((Math.random() * 160) | 0));
+        outCtx.fillStyle = this._grainPat;
+        outCtx.fillRect(0, 0, W + 160, H + 160);
+        outCtx.restore();
       }
-      outCtx.globalAlpha = 1;
-      outCtx.globalCompositeOperation = 'source-over';
     }
 
     /* 톤매퍼 제거됨 (2026-09 최적화):
@@ -379,6 +380,9 @@ const LIGHTS = {
     const lc = this.ctx, W = this.canvas.width, H = this.canvas.height;
     const p = G.player;
     const vw = G.view.w / zoom, vh = G.view.h / zoom;
+    // 화면 밖 광원은 수집 단계에서 차단 (라이트맵 필레이트의 주범 제거)
+    const lL = camL - 60, lT = camT - 60, lR = camL + vw + 60, lB = camT + vh + 60;
+    const lvis = (x, y, m) => x > lL - m && x < lR + m && y > lT - m && y < lB + m;
     this.sampleLava(camL, camT, vw, vh);
     const T = G.time;
     const rushOn = G.rage && G.rage.active;
@@ -396,11 +400,13 @@ const LIGHTS = {
     });
     // 폭발/충격파: 강한 플래시
     for (const ex of G.explosions) {
+      if (!lvis(ex.x, ex.y, ex.r * 3)) continue;
       const t = ex.life / ex.maxLife;
       L.push({ x: ex.x, y: ex.y, r: ex.r * 2.8, color: ex.color || '#ff9a3d', a: Math.min(1, t * 1.3), bloom: t * 0.26 });
     }
     // 도파민 결정: 색조 쉬머
     for (const c of G.crystals) {
+      if (!lvis(c.x, c.y, 140)) continue;
       L.push({ x: c.x, y: c.y, r: 140, color: `hsl(${c.hue + Math.sin(c.wobble) * 14},100%,66%)`, a: flicker(c.x, 0.95), bloom: 0.11 });
     }
     // 용암: 화염광
@@ -409,32 +415,40 @@ const LIGHTS = {
     }
     // 엘리트/보스
     for (const e of G.enemies) {
-      if (e.elite || e.boss) L.push({ x: e.x, y: e.y, r: e.boss ? 240 : 150, color: e.boss ? '#ff2d4e' : '#ffaa2d', a: flicker(e.x, 0.7), bloom: 0 });
+      if (e.elite || e.boss) {
+        if (!lvis(e.x, e.y, 240)) continue;
+        L.push({ x: e.x, y: e.y, r: e.boss ? 240 : 150, color: e.boss ? '#ff2d4e' : '#ffaa2d', a: flicker(e.x, 0.7), bloom: 0 });
+      }
     }
     // 블랙홀 소용돌이 광원
     for (const vo of G.vortices || []) {
+      if (!lvis(vo.x, vo.y, vo.r * 2)) continue;
       L.push({ x: vo.x, y: vo.y, r: 130, color: '#9b5de5', a: clamp(vo.life / vo.maxLife, 0, 1) * 0.55, bloom: 0 });
     }
     // 지형 기믹 광원
     for (const v of G.volatiles || []) {
+      if (!lvis(v.x, v.y, 190)) continue;
       L.push({ x: v.x, y: v.y, r: v.fuse > 0 ? 190 : 90, color: v.fuse > 0 ? '#ff3b2d' : '#ff7a2d', a: flicker(v.x, 0.6), bloom: 0 });
     }
     for (const gh of G.geysers || []) {
+      if (!lvis(gh.x, gh.y, 260)) continue;
       if (gh.state === 'erupt') L.push({ x: gh.x, y: gh.y, r: 260, color: '#ff8a3d', a: 1, bloom: 0.1 });
       else if (gh.state === 'warn') L.push({ x: gh.x, y: gh.y, r: 90 * (1 - gh.t / 0.7), color: '#ff8a3d', a: 0.5, bloom: 0 });
     }
     for (const bn of G.bouncers || []) {
+      if (!lvis(bn.x, bn.y, 110)) continue;
       L.push({ x: bn.x, y: bn.y, r: 110, color: '#2ee6d8', a: flicker(bn.x, 0.45), bloom: 0 });
     }
     // 마탄·레이저·유탄: 움직이는 빛
     for (const b of G.projectiles) {
-      if (b.kind === 'bolt') L.push({ x: b.x, y: b.y, r: 85, color: b.pierce ? `hsl(${(T * 400) % 360},100%,70%)` : '#4de3ff', a: 0.9, bloom: 0 });
-      else if (b.kind === 'lance') L.push({ x: b.x, y: b.y, r: 110, color: '#b388ff', a: 0.8, bloom: 0 });
-      else if (b.kind === 'grenade') L.push({ x: b.x, y: b.y, r: 55, color: '#ff6b35', a: 0.5, bloom: 0 });
-      else if (b.kind === 'smite') L.push({ x: b.tx, y: b.ty, r: 100, color: '#ffe14d', a: 0.7, bloom: 0 });
+      if (b.kind === 'bolt') { if (!lvis(b.x, b.y, 85)) continue; L.push({ x: b.x, y: b.y, r: 85, color: b.pierce ? `hsl(${(T * 400) % 360},100%,70%)` : '#4de3ff', a: 0.9, bloom: 0 }); }
+      else if (b.kind === 'lance') { if (!lvis(b.x, b.y, 110)) continue; L.push({ x: b.x, y: b.y, r: 110, color: '#b388ff', a: 0.8, bloom: 0 }); }
+      else if (b.kind === 'grenade') { if (!lvis(b.x, b.y, 60)) continue; L.push({ x: b.x, y: b.y, r: 55, color: '#ff6b35', a: 0.5, bloom: 0 }); }
+      else if (b.kind === 'smite') { if (!lvis(b.tx, b.ty, 100)) continue; L.push({ x: b.tx, y: b.ty, r: 100, color: '#ffe14d', a: 0.7, bloom: 0 }); }
     }
     // 적 투사체
     for (const b of G.eProjectiles) {
+      if (!lvis(b.x, b.y, 60)) continue;
       L.push({ x: b.x, y: b.y, r: 60, color: b.color, a: 0.7, bloom: 0 });
     }
     // 젬 (가까운 것만)
@@ -442,13 +456,17 @@ const LIGHTS = {
     for (const pk of G.pickups) {
       if (pk.kind !== 'gem') continue;
       if (dist2(pk.x, pk.y, p.x, p.y) < 500 * 500) {
+        if (!lvis(pk.x, pk.y, 42)) continue;
         L.push({ x: pk.x, y: pk.y, r: 42, color: pk.val >= 10 ? '#b06cff' : (pk.val >= 3 ? '#ff4d9d' : '#4de3ff'), a: 0.4, bloom: 0 });
         if (++gemCount > 10) break;
       }
     }
     // 상자
     for (const pk of G.pickups) {
-      if (pk.kind === 'chest') L.push({ x: pk.x, y: pk.y, r: 110, color: '#e8b74a', a: flicker(pk.x, 0.6), bloom: 0.08 });
+      if (pk.kind === 'chest') {
+        if (!lvis(pk.x, pk.y, 110)) continue;
+        L.push({ x: pk.x, y: pk.y, r: 110, color: '#e8b74a', a: flicker(pk.x, 0.6), bloom: 0.08 });
+      }
     }
     // 상한: 화면 중심에서 가까운 순 (품질별 차등)
     const maxL = (typeof QUALITY !== 'undefined') ? QUALITY.maxLights : 46;
@@ -495,6 +513,13 @@ const LIGHTS = {
       ctx.globalCompositeOperation = 'source-over';
       ctx.restore();
     }
+
+    this.details(camL, camT, vw, vh, dt2);
+  },
+
+  /* 씬 직행 디테일 (라이트맵과 분리 — 저사양 격프레임 갱신 시에도 매 프레임 호출해 깜빡임 방지) */
+  details(camL, camT, vw, vh, dt2) {
+    const p = G.player;
 
     /* ---------- 볼류메트릭 라이트 샤프트(모톤 베컴) ----------
      * 고품질에서만: 매 프레임 3개 그라디언트 생성 비용이 큼 */
@@ -1076,24 +1101,35 @@ function render(dt = 1 / 60) {
   const vw = G.view.w / zoom, vh = G.view.h / zoom;
   MapGen.drawWorld(ctx, cam.x - shx - kx - 4, cam.y - shy - ky - 4, vw + 8, vh + 8);
 
-  // 뒤 레이어 안개 (지형 위, 엔티티 아래)
-  // 저사양에서는 뒤 레이어만 그려 필레이트 절약
-  MapGen.drawFog(ctx, 0);
+  // 뷰 바운드 (컬링용, 흔들림 여유 24px 포함)
+  const vL = cam.x - shx - kx - 24, vT = cam.y - shy - ky - 24;
+  const vR = vL + vw + 48, vB = vT + vh + 48;
+
+  // 뒤 레이어 안개 (지형 위, 엔티티 아래) — 캐시 레이어 blit
+  MapGen.renderFogLayers(cam.x - shx - kx, cam.y - shy - ky, vw, vh, zoom);
+  MapGen.blitFog(ctx, 0, cam.x - shx - kx, cam.y - shy - ky, vw, vh);
 
   // POI 지면 마커 (월드 탐색의 핵심 단서 — 적/픽업 아래에 배치)
   drawPOI(ctx);
 
-  // 픽업
-  for (const pk of G.pickups) drawPickup(pk);
+  // 픽업 (컬링)
+  for (const pk of G.pickups) {
+    if (pk.x < vL || pk.x > vR || pk.y < vT || pk.y > vB) continue;
+    drawPickup(pk);
+  }
 
-  // 도파민 결정
-  for (const c of G.crystals) drawCrystal(ctx, c);
+  // 도파민 결정 (컬링, 발광 반경 여유 70px)
+  for (const c of G.crystals) {
+    if (c.x < vL - 70 || c.x > vR + 70 || c.y < vT - 70 || c.y > vB + 70) continue;
+    drawCrystal(ctx, c);
+  }
 
   // 지형 기믹 (탄력 버섯·폭발성 결정·간헐천)
   drawHazards(ctx);
 
-  // 고스트 잔상 (고속 스미어)
+  // 고스트 잔상 (고속 스미어, 컬링)
   for (const gh2 of G.ghosts) {
+    if (gh2.x < vL || gh2.x > vR || gh2.y < vT || gh2.y > vB) continue;
     const ga = clamp(gh2.life / gh2.maxLife, 0, 1) * 0.4;
     ctx.save();
     ctx.translate(gh2.x, gh2.y);
@@ -1110,7 +1146,17 @@ function render(dt = 1 / 60) {
   // 적 (y 정렬) — slice() 할당 없이 제자리 정렬로 GC 압박 제거
   // (업데이트 루프는 순서 비의존이므로 정렬해도 로직에 영향 없음)
   G.enemies.sort((a, b) => a.y - b.y);
-  for (const e of G.enemies) drawEnemy(ctx, e);
+  // 패스 1: 발광 일괄 ('lighter' 1회 진입 — 타일 GPU 파이프라인 플러시 제거)
+  ctx.globalCompositeOperation = 'lighter';
+  for (const e of G.enemies) {
+    const m = e.r * 2.2 + 14; // 오라 반경 여유
+    if (e.x < vL - m || e.x > vR + m || e.y < vT - m || e.y > vB + m) { e._vis = false; continue; }
+    e._vis = true;
+    drawEnemyGlow(ctx, e);
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  // 패스 2: 몸통
+  for (const e of G.enemies) { if (e._vis) drawEnemy(ctx, e); }
 
   // 상인 정령 (적 위, 플레이어 아래 — 만지면 축복 획득)
   drawMerchant(ctx);
@@ -1118,8 +1164,9 @@ function render(dt = 1 / 60) {
   drawPlayer();
   drawProjectiles(ctx);
 
-  // 파티클
+  // 파티클 (컬링 — 바깥 파티클의 save/rotate/그라디언트 비용 제거)
   for (const pt of G.particles) {
+    if (pt.x < vL - 40 || pt.x > vR + 40 || pt.y < vT - 40 || pt.y > vB + 40) continue;
     const a = clamp(pt.life / pt.maxLife, 0, 1);
     if (pt.shape === 'shard') {
       ctx.save();
@@ -1160,16 +1207,18 @@ function render(dt = 1 / 60) {
   ctx.globalAlpha = 1;
 
   // 앞 레이어 안개 (엔티티 위 — 깊이감, 저사양은 스킵)
-  if (QUALITY.level >= 1) MapGen.drawFog(ctx, 1);
+  if (QUALITY.level >= 1) MapGen.blitFog(ctx, 1, cam.x - shx - kx, cam.y - shy - ky, vw, vh);
 
-  // 피해 텍스트
+  // 피해 텍스트 (컬링 + 폰트 캐시)
   ctx.textAlign = 'center';
   for (const t of G.dmgTexts) {
+    if (t.x < vL - 60 || t.x > vR + 60 || t.y < vT - 60 || t.y > vB + 60) continue;
     const a = clamp(t.life / t.maxLife, 0, 1);
     const pop = t.scale * (1 + (1 - a) * 0.3);
     ctx.globalAlpha = a;
-    // 폰트 문자열 생성 비용 절약: 크기를 정수로 양자화
-    ctx.font = `900 ${Math.round(17 * pop)}px 'Segoe UI',sans-serif`;
+    // 폰트 문자열 생성 비용 절약: 정수 크기 버킷 캐시
+    const fs = Math.round(17 * pop);
+    ctx.font = fontCache[fs] || (fontCache[fs] = `900 ${fs}px 'Segoe UI',sans-serif`);
     ctx.lineWidth = 3.5;
     ctx.strokeStyle = 'rgba(0,0,0,0.7)';
     if (t.isPlayer) {
@@ -1191,7 +1240,14 @@ function render(dt = 1 / 60) {
 
   /* ---------- 다이내믹 라이팅 (라이트맵 + 블룸) ---------- */
   if (G.player && LIGHTS.canvas) {
-    LIGHTS.render(cam.x - shx - kx, cam.y - shy - ky, shx, shy, kx, ky, zoom, dt);
+    // 저사양은 라이트맵만 격프레임 갱신 (부드러운 조명이라 30Hz로도 동일)
+    // 그림자/먼지 등 씬 디테일은 매 프레임 그려 깜빡임 방지
+    if (QUALITY.level > 0 || ((G.frame || 0) % 2 === 0)) {
+      LIGHTS.render(cam.x - shx - kx, cam.y - shy - ky, shx, shy, kx, ky, zoom, dt);
+    } else {
+      const vw2 = G.view.w / zoom, vh2 = G.view.h / zoom;
+      LIGHTS.details(cam.x - shx - kx, cam.y - shy - ky, vw2, vh2, dt);
+    }
   }
 
   /* ---------- 포스트 프로세싱 → 화면 합성 ---------- */
@@ -1394,6 +1450,7 @@ function drawPickup(pk) {
 
 /* ---------- HUD (DOM) ---------- */
 let hudAcc = 0;
+const fontCache = {};
 function updateHUD(force) {
   const p = G.player;
   if (!p) return;
@@ -1550,6 +1607,7 @@ window.addEventListener('keydown', (e) => {
     activateRush();
   }
   if (e.code === 'Escape' || e.code === 'KeyP') togglePause();
+  if (e.code === 'KeyF') toggleFullscreen();
   if (e.code === 'KeyM') { try { SFX.init(); SFX.setMuted(!SFX.muted); document.getElementById('muteBtn').textContent = SFX.muted ? '🔇' : '🔊'; } catch (err) {} }
   if (G.state === 'levelup') {
     const n = parseInt(e.key, 10);
@@ -1576,6 +1634,19 @@ function togglePause() {
     G.state = 'playing';
     document.getElementById('overlay-pause').classList.add('hidden');
   }
+}
+
+function toggleFullscreen() {
+  try {
+    if (!document.fullscreenElement) {
+      const el = document.documentElement;
+      const req = el.requestFullscreen && el.requestFullscreen();
+      if (req && req.catch) req.catch(() => {});
+    } else {
+      const ex = document.exitFullscreen && document.exitFullscreen();
+      if (ex && ex.catch) ex.catch(() => {});
+    }
+  } catch (e) {}
 }
 
 /* 터치 조이스틱 — UI 버튼/패널 위 터치는 이동으로 오인하지 않음 */
@@ -1916,7 +1987,9 @@ function updatePOIs(dt) {
 }
 
 function drawPOI(ctx) {
+  const [pL, pT, pR, pB] = viewRect(0);
   for (const poi of G.pois) {
+    if (poi.x < pL - 220 || poi.x > pR + 220 || poi.y < pT - 220 || poi.y > pB + 220) continue;
     ctx.save();
     ctx.translate(poi.x, poi.y);
     if (poi.type === 'nest') {
@@ -2080,6 +2153,8 @@ const WORLD_EVENTS = {
 function drawMerchant(ctx) {
   const m = G.merchant;
   if (!m) return;
+  const [mL, mT, mR, mB] = viewRect(80);
+  if (m.x < mL || m.x > mR || m.y < mT || m.y > mB) return;
   m.t = (m.t || 0) + 1 / 60;
   const bob = Math.sin(m.t * 3) * 8;
   ctx.save();
@@ -2142,6 +2217,17 @@ function bindUI() {
   setMuteIcon();
   document.getElementById('pauseBtn').onclick = togglePause;
   document.getElementById('rageBtn').onclick = activateRush;
+  // 전체화면 (미지원 기기(iOS Safari 등)에서는 버튼 숨김)
+  const fsBtn = document.getElementById('fsBtn');
+  if (fsBtn) {
+    if (!document.fullscreenEnabled) fsBtn.classList.add('hidden');
+    else {
+      fsBtn.onclick = toggleFullscreen;
+      document.addEventListener('fullscreenchange', () => {
+        fsBtn.textContent = document.fullscreenElement ? '🗗' : '⛶';
+      });
+    }
+  }
   // 품질 전환 버튼 (HUD): 2→0→1→2 순환
   const qBtn = document.getElementById('qualityBtn');
   const qIcons = ['🥔', '⚖️', '✨'];

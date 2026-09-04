@@ -657,6 +657,9 @@ function updateProjectiles(dt) {
 /* 무기 투사체 그리기 */
 function drawProjectiles(ctx) {
   const p = G.player;
+  // 화면 밖 투사체 드로우콜 차단 (위치는 시뮬레이션과 무관)
+  const [cL, cT, cR, cB] = viewRect(0);
+  const vis = (x, y, m) => x > cL - m && x < cR + m && y > cT - m && y < cB + m;
 
   // 오라
   if (G.weapons.aura) {
@@ -737,6 +740,7 @@ function drawProjectiles(ctx) {
 
   // 블랙홀 소용돌이
   for (const vo of G.vortices || []) {
+    if (!vis(vo.x, vo.y, vo.r * 2)) continue;
     const t = vo.life / vo.maxLife;
     const spin = G.time * 5;
     ctx.save();
@@ -767,6 +771,7 @@ function drawProjectiles(ctx) {
   // 천벌 망치 (예고 → 낙하)
   for (const b of G.projectiles) {
     if (b.kind !== 'smite') continue;
+    if (!vis(b.tx, b.ty, b.r + 460)) continue; // 망치가 420px 위에서 낙하
     const prog = clamp(b.t / b.dur, 0, 1);
     if (prog < 1) {
       // 예고 링
@@ -799,6 +804,7 @@ function drawProjectiles(ctx) {
     if (b.kind !== 'meteor') continue;
     const prog = clamp(b.t / b.dur, 0, 1);
     // 목표 링
+    if (!vis(b.tx, b.ty, b.r + 100)) continue;
     ctx.strokeStyle = `rgba(255,138,61,${0.3 + prog * 0.55})`;
     ctx.lineWidth = 2.2;
     ctx.beginPath(); ctx.arc(b.tx, b.ty, b.r * (0.5 + prog * 0.5), 0, TAU); ctx.stroke();
@@ -815,8 +821,9 @@ function drawProjectiles(ctx) {
     ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(mx + 60, my - 96); ctx.stroke();
   }
 
-  // 번개 (시네마틱 다중 분기)
+  // 번개 (시네마틱 다중 분기) — 300px 위에서 내리꽂히므로 세로 여유
   for (const b of G.fx.bolts) {
+    if (b.x < cL - 60 || b.x > cR + 60 || b.y < cT - 340 || b.y > cB + 40) continue;
     const a = b.life / b.maxLife;
     ctx.globalCompositeOperation = 'lighter';
     Glow.draw(ctx, '#ffe14d', b.x, b.y, 70 * (1.5 - a), a * 0.75);
@@ -849,6 +856,7 @@ function drawProjectiles(ctx) {
   for (const ex of G.explosions) {
     const t = 1 - ex.life / ex.maxLife;
     const r = ex.r * (0.35 + t * 0.85);
+    if (!vis(ex.x, ex.y, r + 10)) continue;
     const col = ex.color || '#ff8c32';
     ctx.globalCompositeOperation = 'lighter';
     // 확장 링
@@ -870,6 +878,7 @@ function drawProjectiles(ctx) {
 
   for (const b of G.projectiles) {
     if (b.kind === 'bolt') {
+      if (!vis(b.x, b.y, 60)) continue;
       // 혜성형 마탄: 발광 꼬리 + 코어
       const boltCol = b.pierce ? `hsl(${(G.time * 400 + b.x) % 360},100%,65%)` : '#4de3ff';
       ctx.globalCompositeOperation = 'lighter';
@@ -889,6 +898,7 @@ function drawProjectiles(ctx) {
       ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.5, 0, TAU); ctx.fill();
     }
     else if (b.kind === 'boomerang') {
+      if (!vis(b.x, b.y, 60)) continue;
       // 모션 스미어: 속도 반대편으로 늘어진 발광 잔상
       const spNow = Math.hypot(b.vx, b.vy) || 1;
       ctx.globalCompositeOperation = 'lighter';
@@ -904,6 +914,7 @@ function drawProjectiles(ctx) {
       ctx.restore();
     }
     else if (b.kind === 'grenade') {
+      if (!vis(b.x, b.y, 30) && !vis(b.tx, b.ty, b.aoe)) continue;
       ctx.fillStyle = '#333';
       ctx.beginPath(); ctx.arc(b.x, b.y, 8, 0, TAU); ctx.fill();
       ctx.fillStyle = '#ff6b35';
@@ -915,6 +926,7 @@ function drawProjectiles(ctx) {
       ctx.setLineDash([]);
     }
     else if (b.kind === 'lance') {
+      if (!vis(b.x, b.y, 110)) continue;
       const a = Math.atan2(b.vy, b.vx);
       ctx.save();
       ctx.translate(b.x, b.y);
@@ -932,6 +944,7 @@ function drawProjectiles(ctx) {
 
   // 적 투사체
   for (const b of G.eProjectiles) {
+    if (!vis(b.x, b.y, 30)) continue;
     const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r + 5);
     grad.addColorStop(0, '#fff');
     grad.addColorStop(0.5, b.color);
