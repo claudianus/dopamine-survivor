@@ -1499,10 +1499,10 @@ function updateHUD(force) {
       document.getElementById('bossfill').style.width = clamp(G.boss.hp / G.boss.maxHp, 0, 1) * 100 + '%';
     } else bb.classList.add('hidden');
 
-    // 미니맵
+    // 미니맵 (내부 144px 렌더 → CSS clamp 스케일)
     const mmC = document.getElementById('minimap');
-    if (mmC.width !== 132) { mmC.width = 132; mmC.height = 132; }
-    MapGen.drawMinimap(mmC.getContext('2d'), 132, p.x, p.y, G.enemies, G.boss);
+    if (mmC.width !== 144) { mmC.width = 144; mmC.height = 144; }
+    MapGen.drawMinimap(mmC.getContext('2d'), 144, p.x, p.y, G.enemies, G.boss);
   }
 }
 
@@ -2246,6 +2246,13 @@ function bindUI() {
 
 /* ---------- 부팅 ---------- */
 window.addEventListener('load', () => {
+  // 1차 입력 판정: 터치 전용 기기(폰·태블릿)에만 모바일 UI 노출
+  // (pointer:coarse는 터치스크린 노트북에서도 매칭되어 PC에 모바일 UI가 새던 문제 방지)
+  try {
+    const touchUI = matchMedia('(hover: none) and (pointer: coarse)').matches ||
+      (('ontouchstart' in window) && !matchMedia('(pointer: fine)').matches);
+    document.body.classList.toggle('is-touch', !!touchUI);
+  } catch (e) {}
   if (typeof QUALITY !== 'undefined') QUALITY.detect();
   resize();
   LIGHTS.init();
