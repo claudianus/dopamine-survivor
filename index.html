@@ -2,162 +2,114 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>도파민 서바이버 - 프로시듀럴 맵 서바이벌</title>
-<meta name="description" content="무한 프로시듀럴 맵에서 벌어지는 도파민 폭발 서바이벌! 레벨업, 무기 수집, 보물 상자, 보스전!">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>도파민 서바이버 — 무한 프로시듀럴 서바이벌</title>
+<meta name="description" content="무한 프로시듀럴 월드에서 20분간 살아남아라! 9종 무기 진화, 4종 보스, 퀘스트와 월드 이벤트. 순수 Canvas + Vanilla JS, 설치 없이 브라우저에서 바로 플레이.">
+<meta name="theme-color" content="#070910">
+<meta property="og:type" content="website">
+<meta property="og:title" content="💎 도파민 서바이버">
+<meta property="og:description" content="무한 프로시듀럴 월드 · 20분 생존 · 도파민 폭발 서바이벌. 브라우저에서 바로 플레이!">
+<meta property="og:url" content="https://claudianus.github.io/dopamine-survivor/">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>💎</text></svg>">
-<link rel="stylesheet" href="style.css?v=115">
+<link rel="stylesheet" href="landing.css?v=1">
 </head>
 <body>
 
-<canvas id="game"></canvas>
-
-<!-- 렌즈 광학 필터 (포스트FX): 채널 분리 + 휘도 임계값 브라이트패스 -->
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <filter id="chR" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0"/></filter>
-  <filter id="chB" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0"/></filter>
-  <filter id="bp" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
-    <feColorMatrix type="matrix" result="lum"
-      values="1 0 0 0 0
-              0 1 0 0 0
-              0 0 1 0 0
-              0.2126 0.7152 0.0722 0 0"/>
-    <feComponentTransfer in="lum" result="th">
-      <feFuncA type="table" tableValues="0 0 0 0 0 0 0 0.08 0.32 0.66 1"/>
-    </feComponentTransfer>
-    <feComposite in="th" in2="th" operator="in"/>
-  </filter>
-</svg>
-
-<!-- ============ HUD ============ -->
-<div id="hud" class="hidden">
-  <div id="xpbar">
-    <div id="xpfill"></div>
-    <div id="lvbadge">LV 1</div>
+<header class="nav">
+  <a class="brand" href="./">💎 도파민 서바이버</a>
+  <nav class="links">
+    <a href="#features">기능</a>
+    <a href="#arsenal">무기고</a>
+    <a href="#world">월드</a>
+    <a href="#tech">기술</a>
+  </nav>
+  <div class="nav-cta">
+    <a class="gh" href="https://github.com/claudianus/dopamine-survivor" target="_blank" rel="noopener" aria-label="GitHub 저장소">★ GitHub</a>
+    <a class="btn-play" href="play.html">▶ 플레이</a>
   </div>
+</header>
 
-  <div id="topbar">
-    <div id="timer">00:00</div>
-    <div id="topstats">
-      <span id="kills">💀 0</span>
-      <span id="gemcount">💎 0</span>
+<main>
+  <!-- 히어로 -->
+  <section class="hero">
+    <div class="hero-bg" aria-hidden="true"></div>
+    <p class="kicker">VAMPIRE-SURVIVORS LIKE · PURE CANVAS + VANILLA JS · ZERO ASSETS</p>
+    <h1><span class="grad">도파민</span> 서바이버</h1>
+    <p class="tagline">무한 프로시듀럴 월드에서 20분간 살아남아라.<br>무기를 진화시키고, 최종 보스 <b>도파민 데몬</b>을 사냥하라.</p>
+    <form id="seedForm" class="seed-form" action="play.html" method="get">
+      <input id="seedInput" name="seed" placeholder="시드 입력 (비우면 랜덤) — 같은 시드 = 같은 월드" maxlength="20" autocomplete="off">
+      <button type="submit" class="btn-play big">▶ 게임 시작</button>
+    </form>
+    <div class="chips">
+      <span>⚔️ 9종 무기 × 진화</span><span>👑 보스 4종</span><span>🗺️ 바이옴 10종</span><span>📜 무한 퀘스트</span><span>⚡ 도파민 러시</span>
     </div>
-  </div>
+    <p class="req">설치 없음 · PC / 태블릿 / 스마트폰 지원 · 자동 절전 그래픽</p>
+  </section>
 
-  <div id="seedTag"></div>
-
-  <div id="questPanel" class="hidden">
-    <span id="questIcon">⚔️</span>
-    <span id="questText">...</span>
-    <div id="questTrack"><div id="questBarFill"></div></div>
-    <span id="questProg">0 / 0</span>
-    <span id="questCount">완료 0</span>
-  </div>
-
-  <div id="eventTag" class="hidden"></div>
-
-  <div id="bossbar" class="hidden">
-    <div id="bossname">보스</div>
-    <div id="bosstrack"><div id="bossfill"></div></div>
-  </div>
-
-  <canvas id="minimap"></canvas>
-
-  <div id="bottombar">
-    <div id="weaponBar"></div>
-    <div id="ragebar">
-      <div id="ragefill"></div>
-      <span id="ragetext">⚡ 도파민 러시</span>
+  <!-- 기능 -->
+  <section id="features" class="section">
+    <h2>✨ 왜 재미있는가</h2>
+    <div class="grid">
+      <article class="card"><div class="emoji">🗺️</div><h3>무한 프로시듀럴 월드</h3><p>시드 기반 심플렉스 노이즈로 초원·흑림·설원·사막·화산·도파민 광산 등 10종 바이옴이 끝없이 생성. 빙판 드리프트, 진흙 수렁, 심수 차단까지 지형 물리 탑재.</p></article>
+      <article class="card"><div class="emoji">💥</div><h3>도파민 폭발 연출</h3><p>파티클 파열, 화면 흔들림, 데미지 숫자, 크리티컬, 콤보, 레벨업 폭죽, 슬롯머신 보물 상자, 보스 등장 레터박스까지 쉴 틈 없는 피드백.</p></article>
+      <article class="card"><div class="emoji">🌟</div><h3>무기 진화 시스템</h3><p>9종 무기를 만렙(5레벨)까지 키운 뒤 보물 상자를 열면 슈퍼 무기로 진화. 플루토늄 스타, 심연의 회전문, 최후의 심판…</p></article>
+      <article class="card"><div class="emoji">👑</div><h3>시간이 곧 난이도</h3><p>5분 슬라임 킹 → 10분 전갈 왕 → 15분 서리 거인 → 20분 도파민 데몬. 45초 러시 웨이브와 정예 웨이브가 압박을 더한다.</p></article>
+      <article class="card"><div class="emoji">📜</div><h3>목적성 시스템</h3><p>사냥·수집·탐험·콤보 등 무한 연결 퀘스트, 유성우·젬비·광란의 밤·상인 정령 월드 이벤트, 보물 둥지·도파민 샘·혈천 의식 POI.</p></article>
+      <article class="card"><div class="emoji">🎧</div><h3>절차적 사운드</h3><p>효과음 20종과 다크 앰비언트 BGM을 WebAudio로 실시간 합성. 에셋 파일 0개, 스테레오 패닝으로 위치감까지.</p></article>
     </div>
-    <div id="hpbar">
-      <div id="hpfill"></div>
-      <span id="hptext">100 / 100</span>
+  </section>
+
+  <!-- 무기고 -->
+  <section id="arsenal" class="section">
+    <h2>⚔️ 무기고 (9종 × 5레벨 → 진화)</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>무기</th><th>스타일</th><th>진화</th></tr></thead>
+      <tbody>
+        <tr><td>✨ 매직 볼트</td><td>유도 마탄</td><td>🌟 플루토늄 스타 (관통+폭발)</td></tr>
+        <tr><td>🗡️ 궤도 검</td><td>주위 회전</td><td>⚔️ 심연의 회전문 (흡인 검풍)</td></tr>
+        <tr><td>⚡ 번개</td><td>광역 낙뢰</td><td>🌩️ 천벌 (연쇄 뇌격)</td></tr>
+        <tr><td>💫 도파민 오라</td><td>지속 장판</td><td>🌸 도파민 폭풍 (넉백 성역)</td></tr>
+        <tr><td>🪃 부메랑</td><td>관통 왕복</td><td>🌀 차원 부메랑 (잔영 분열)</td></tr>
+        <tr><td>💣 유탄 포</td><td>곡사 폭발</td><td>☄️ 미니엄 포 (산탄 폭발)</td></tr>
+        <tr><td>🔮 레이저 창</td><td>관통 광선</td><td>🌈 프리즘 레이저 (8방위)</td></tr>
+        <tr><td>🕳️ 블랙홀</td><td>흡인 소용돌이</td><td>🌀 심연의 문 (격노 소용돌이)</td></tr>
+        <tr><td>🔨 천벌 망치</td><td>지정 강타</td><td>⚡ 최후의 심판 (이중 강타)</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">패시브 11종(파워·공속·질주·생명·자석·치명·지혜·재생·행운·탐욕·가시갑주) × 5레벨 조합으로 빌드를 완성하라.</p>
+  </section>
+
+  <!-- 월드/조작 -->
+  <section id="world" class="section">
+    <h2>🕹️ 조작 &amp; 팁</h2>
+    <div class="cols">
+      <div class="card"><h3>🖥️ PC</h3><p>이동 <b>WASD / 방향키</b> · 줌 <b>마우스 휠</b> · 러시 <b>SPACE</b> · 일시정지 <b>ESC / P</b> · 음소거 <b>M</b> · 레벨업 <b>1~3</b></p></div>
+      <div class="card"><h3>📱 모바일 · 태블릿</h3><p>화면 드래그로 이동(가상 조이스틱) · 두 손가락 핀치로 줌 · ⚡ 버튼으로 러시 발동</p></div>
     </div>
-    <div id="passiveBar"></div>
-  </div>
-
-  <div id="combo"></div>
-  <div id="banner"></div>
-</div>
-
-<button id="muteBtn" class="iconbtn" title="소리 켜기/끄기">🔊</button>
-<button id="pauseBtn" class="iconbtn hidden" title="일시정지 (ESC)">⏸️</button>
-<button id="rageBtn" title="도파민 러시! (SPACE)">⚡</button>
-
-<div id="rushfx"></div>
-
-<div id="joystick"><div></div></div>
-
-<!-- ============ 타이틀 ============ -->
-<div id="overlay-title" class="overlay">
-  <div class="panel title-panel">
-    <div class="logo">
-      <span class="logo-dopa">도파민</span> <span class="logo-surv">서바이버</span>
+    <div class="cols">
+      <div class="card"><h3>💡 초보 팁</h3><p>미니맵 <b>◆ 표식</b>을 따라가면 이벤트 존이 있다. 도파민 샘에서 체력·게이지를 충전하고, 광산 도적(💰)을 잡으면 젬 자루가 터진다.</p></div>
+      <div class="card"><h3>🌱 시드 공유</h3><p>마음에 드는 월드를 찾았다면 시드를 메모해 친구와 공유하라. 같은 시드는 같은 월드, 같은 이벤트 배치가 보장된다.</p></div>
     </div>
-    <div class="tagline">무한 프로시듀럴 월드 · 20분 생존 · 도파민 폭발</div>
+  </section>
 
-    <div class="seed-row">
-      <input id="seedInput" placeholder="시드 (비우면 랜덤)" maxlength="20" autocomplete="off">
-      <button id="btn-random-seed" class="btn small">🎲</button>
+  <!-- 기술 -->
+  <section id="tech" class="section">
+    <h2>🛠️ 기술 스택</h2>
+    <div class="chips tech">
+      <span>Canvas 2D</span><span>Vanilla JS</span><span>WebAudio 합성</span><span>Simplex Noise</span><span>공간 해시</span><span>청크 캐싱</span><span>다이내믹 라이팅</span><span>포스트FX</span><span>적응형 품질</span><span>빌드 0 · 의존성 0</span>
     </div>
-
-    <button id="btn-start" class="btn start">▶ 게임 시작</button>
-
-    <div class="howto">
-      <div><b>이동</b> WASD / 방향키 / 터치 드래그 &nbsp;·&nbsp; <b>줌</b> 마우스 휠</div>
-      <div><b>공격</b> 자동 &nbsp;·&nbsp; <b>도파민 러시</b> SPACE (게이지 최대 시)</div>
-      <div><b>목표</b> 무기를 만렙 찍어 <b class="pink">진화</b>시키고, 20분 뒤 오는 최종 보스를 사냥하라</div>
+    <p class="note">저사양 자동 절전(🥔/⚖️/✨ 3단계, FPS 감지 자동 전환)으로 스마트폰에서도 60fps를 노린다. 자세한 구조는 <a href="https://github.com/claudianus/dopamine-survivor">README</a> 참고.</p>
+    <div class="cta-row">
+      <a class="btn-play big" href="play.html">▶ 지금 플레이</a>
+      <a class="btn-ghost" href="https://github.com/claudianus/dopamine-survivor" target="_blank" rel="noopener">★ Star on GitHub</a>
     </div>
-    <div id="bestScore" class="best"></div>
-  </div>
-</div>
+  </section>
+</main>
 
-<!-- ============ 레벨업 ============ -->
-<div id="overlay-levelup" class="overlay hidden">
-  <div class="panel lu-panel">
-    <div class="lu-head">⚡ 레벨 업! ⚡</div>
-    <div class="lu-sub">강화를 선택하세요 (1~3 키 또는 클릭)</div>
-    <div id="lu-cards"></div>
-  </div>
-</div>
+<footer>
+  <p>💎 도파민 서바이버 · MIT License · 순수 Canvas + Vanilla JS · 에셋 0개로 제작</p>
+  <p><a href="play.html">게임 시작</a> · <a href="https://github.com/claudianus/dopamine-survivor">GitHub</a></p>
+</footer>
 
-<!-- ============ 보물 상자 ============ -->
-<div id="overlay-chest" class="overlay hidden">
-  <div class="panel ch-panel">
-    <div id="ch-title">💎 보물 상자!</div>
-    <div class="ch-sub">행운의 강화가 결정되는 중...</div>
-    <div id="ch-slots"></div>
-    <div id="ch-result"></div>
-    <button id="ch-done" class="btn hidden">획득 완료!</button>
-  </div>
-</div>
-
-<!-- ============ 일시정지 ============ -->
-<div id="overlay-pause" class="overlay hidden">
-  <div class="panel">
-    <div class="ov-title">⏸️ 일시정지</div>
-    <button id="btn-resume" class="btn">계속하기</button>
-    <button id="btn-quit" class="btn danger">메인으로</button>
-  </div>
-</div>
-
-<!-- ============ 게임 오버 / 승리 ============ -->
-<div id="overlay-end" class="overlay hidden">
-  <div class="panel end-panel">
-    <div id="end-title">게임 오버</div>
-    <div id="end-sub"></div>
-    <div id="end-stats"></div>
-    <button id="btn-retry" class="btn start">🔄 다시 도전</button>
-    <button id="btn-menu" class="btn">메인으로</button>
-  </div>
-</div>
-
-<script src="js/core.js?v=115"></script>
-<script src="js/audio.js?v=115"></script>
-<script src="js/map.js?v=115"></script>
-<script src="js/entities.js?v=115"></script>
-<script src="js/weapons.js?v=115"></script>
-<script src="js/upgrades.js?v=115"></script>
-<script src="js/game.js?v=115"></script>
 </body>
 </html>

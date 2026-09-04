@@ -42,11 +42,15 @@ const POST = {
 
   resize() {
     if (!this.bloomA) return;
-    const q = 0.25;
+    // 저사양은 블룸 해상도를 더 낮춰 CPU/GPU 부하 절감
+    const q = (typeof QUALITY !== 'undefined' && QUALITY.level === 0) ? 0.16
+      : (typeof QUALITY !== 'undefined' && QUALITY.level === 1) ? 0.2 : 0.25;
     this.bloomA.width = Math.max(2, (G.view.w * q) | 0);
     this.bloomA.height = Math.max(2, (G.view.h * q) | 0);
     this.bloomB.width = this.bloomA.width; this.bloomB.height = this.bloomA.height;
     this.streak.width = this.bloomA.width; this.streak.height = this.bloomA.height;
+    this._gradeGrad = null;
+    this._bpCacheT = 0; this._bpCache = false;
   },
 
   triggerChroma(a) { this.chroma = Math.min(0.6, Math.max(this.chroma, a)); },
@@ -71,9 +75,8 @@ const POST = {
   },
 
   render(dt, camL, camT, zoom) {
-    // 자체 소프트 스퀴즈 톤맵: 이번 프레임 하이라이트 압축 플래그
-    this._needTonemap = true;
     const W = G.view.w, H = G.view.h;
+    const qLevel = (typeof QUALITY !== 'undefined') ? QUALITY.level : 2;
     outCtx.setTransform(G.dpr, 0, 0, G.dpr, 0, 0);
 
     /* 쇼크웨이브 왜곡: 세로 스트립을 방사형으로 밀어냄 */
@@ -108,11 +111,12 @@ const POST = {
       // ===== 자체 픽셀 브라이트패스 =====
       // SVG filter(url)는 GPU/드라이버별로 결과가 달라져 전체 과다노출 버그의 원인이 됨.
       // ImageData 직접 순회로 휘도 0.72 이하 픽셀을 0으로 만든다 — 완전히 결정적.
-      // 성능: 1/4 해상도만 처리, 매 프레임 전체 순회는 부담이므로 0.5초 캐시 후 보간.
       // 게임이 멈춘 상태(레벨업/상자/일시정지)에선 블룸 갱신/합성 스킵 — 오래된 밝은 프레임 방출 방지
-      if (G.state !== 'playing') return;
+      // 저사양은 갱신 주기를 늦춰 CPU 절약 (0:900ms / 1:600ms / 2:450ms)
+      if (G.state === 'playing') {
       const now2 = performance.now();
-      if (!this._bpCache || now2 - this._bpCacheT > 450) {
+      const bpInterval = qLevel === 0 ? 900 : (qLevel === 1 ? 600 : 450);
+      if (!this._bpCache || now2 - this._bpCacheT > bpInterval) {
         this._bpCacheT = now2;
         // 원본을 임시 캔버스에 담고
         const tcv = this._bpTmp || (this._bpTmp = document.createElement('canvas'));
@@ -143,14 +147,15 @@ const POST = {
         // 캐시 주기 사이: 전프레임 bloomA 유지 (컨텍스트 유지됨)
       }
       // 와이드 블룸 (부드러운 광량 확산) — 채도 절제로 형광 포화 방지
+      // 저사양은 블러 반경을 줄여 GPU 부하 절감
       const b2 = this.bloomB.getContext('2d');
       b2.setTransform(1, 0, 0, 1, 0, 0);
       b2.clearRect(0, 0, bw, bh);
-      b2.filter = 'blur(7px) saturate(0.55)';
+      b2.filter = qLevel === 0 ? 'blur(4px) saturate(0.55)' : 'blur(7px) saturate(0.55)';
       b2.drawImage(this.bloomA, 0, 0);
       b2.filter = 'none';
       outCtx.globalCompositeOperation = 'lighter';
-      outCtx.globalAlpha = 0.24;
+      outCtx.globalAlpha = qLevel === 0 ? 0.18 : 0.24;
       outCtx.drawImage(this.bloomB, 0, 0, W, H);
       // 타이트 블룸 (광원 중심의 또렷한 글로어)
       b2.clearRect(0, 0, bw, bh);
@@ -159,21 +164,24 @@ const POST = {
       b2.filter = 'none';
       outCtx.globalAlpha = 0.27;
       outCtx.drawImage(this.bloomB, 0, 0, W, H);
-      // 아나모픽 렌즈 스트릭: 브라이트패스를 수평으로 6배 늘린 빛줄기
-      const sc = this.streak.getContext('2d');
-      sc.setTransform(1, 0, 0, 1, 0, 0);
-      sc.clearRect(0, 0, bw, bh);
-      sc.filter = 'blur(1.6px) saturate(0.5)';
-      sc.drawImage(this.bloomA, -bw * 2.5, 0, bw * 6, bh);
-      sc.filter = 'none';
-      outCtx.globalAlpha = 0.22;
-      outCtx.drawImage(this.streak, 0, 0, W, H);
+      // 아나모픽 렌즈 스트릭: 저사양(레벨0)은 스킵
+      if (qLevel >= 1 && QUALITY.streakOn) {
+        const sc = this.streak.getContext('2d');
+        sc.setTransform(1, 0, 0, 1, 0, 0);
+        sc.clearRect(0, 0, bw, bh);
+        sc.filter = 'blur(1.6px) saturate(0.5)';
+        sc.drawImage(this.bloomA, -bw * 2.5, 0, bw * 6, bh);
+        sc.filter = 'none';
+        outCtx.globalAlpha = 0.22;
+        outCtx.drawImage(this.streak, 0, 0, W, H);
+      }
       outCtx.globalAlpha = 1;
       outCtx.globalCompositeOperation = 'source-over';
+      } // end playing bloom
     }
 
-    /* 렌즈 플레어: 밝은 광원의 고스트 체인 + 십자 스타버스트 (실제 렌즈 광학 구조) */
-    if (typeof LIGHTS !== 'undefined' && LIGHTS.bloom && LIGHTS.bloom.length) {
+    /* 렌즈 플레어: 저사양은 스킵 (필레이트 절약) */
+    if (qLevel >= 2 && typeof LIGHTS !== 'undefined' && LIGHTS.bloom && LIGHTS.bloom.length) {
       const cands = LIGHTS.bloom.filter(l => l.a > 0.55).slice(0, 3);
       if (cands.length) {
         outCtx.globalCompositeOperation = 'lighter';
@@ -236,14 +244,15 @@ const POST = {
       outCtx.globalCompositeOperation = 'source-over';
     }
 
-    /* 도파민 러시: 스피드라인 (방사형 블러는 Khronos 톤맵 시대에 제거 — 과노출 원인) */
+    /* 도파민 러시: 스피드라인 — 저사양은 12개로 절감 */
     if (G.rage && G.rage.active) {
       // 스피드라인
       const cx = W / 2, cy = H / 2;
       outCtx.strokeStyle = 'rgba(255,120,190,0.16)';
       outCtx.lineWidth = 2;
-      for (let i = 0; i < 22; i++) {
-        const a = (i / 22) * Math.PI * 2 + this.speedLineRot;
+      const nLines = qLevel === 0 ? 12 : 22;
+      for (let i = 0; i < nLines; i++) {
+        const a = (i / nLines) * Math.PI * 2 + this.speedLineRot;
         const r0 = Math.min(W, H) * (0.34 + 0.16 * Math.abs(Math.sin(i * 3.7 + G.time * 9)));
         outCtx.beginPath();
         outCtx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
@@ -253,64 +262,40 @@ const POST = {
       outCtx.globalCompositeOperation = 'source-over';
     }
 
-    /* 시네마 그레이드: 중심 웜 / 가장자리 쿨 (soft-light) */
-    outCtx.globalCompositeOperation = 'soft-light';
-    const grade = outCtx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.2, W / 2, H / 2, Math.max(W, H) * 0.75);
-    grade.addColorStop(0, 'rgba(255,190,130,0.18)');
-    grade.addColorStop(1, 'rgba(60,110,170,0.24)');
-    outCtx.fillStyle = grade;
-    outCtx.fillRect(0, 0, W, H);
-    outCtx.globalCompositeOperation = 'source-over';
-
-    /* 필름 그레인 */
-    outCtx.globalCompositeOperation = 'overlay';
-    outCtx.globalAlpha = 0.038;
-    const gx = -Math.random() * 160, gy = -Math.random() * 160;
-    for (let ty2 = gy; ty2 < H; ty2 += 160) {
-      for (let tx2 = gx; tx2 < W; tx2 += 160) {
-        outCtx.drawImage(this.grain, tx2, ty2);
+    /* 시네마 그레이드: 중심 웜 / 가장자리 쿨 (soft-light) — 그라디언트 캐시 */
+    if (qLevel >= 1) {
+      outCtx.globalCompositeOperation = 'soft-light';
+      if (!this._gradeGrad || this._gradeW !== W || this._gradeH !== H) {
+        this._gradeW = W; this._gradeH = H;
+        const gg = outCtx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.2, W / 2, H / 2, Math.max(W, H) * 0.75);
+        gg.addColorStop(0, 'rgba(255,190,130,0.18)');
+        gg.addColorStop(1, 'rgba(60,110,170,0.24)');
+        this._gradeGrad = gg;
       }
+      outCtx.fillStyle = this._gradeGrad;
+      outCtx.fillRect(0, 0, W, H);
+      outCtx.globalCompositeOperation = 'source-over';
     }
-    outCtx.globalAlpha = 1;
-    outCtx.globalCompositeOperation = 'source-over';
 
-    /* ===== 자체 소프트 스퀴즈 톤매퍼 (2D) =====
-     * 후반부 이펙트 과다 시 하이라이트가 255 클램핑으로 하얗게 날아가는 것을
-     * 휘도 199 이상 영역만 지수 롤오프로 압축해 방지. 색상비(RGB ratio) 유지.
-     * 씬과 동일 sRGB 공간 — 외부 톤맵 커브의 미스매치/UV 뒤집힘 없음. */
-    if (this._needTonemap) {
-      this._needTonemap = false;
-      try {
-        const tw = Math.max(2, W >> 1), th = Math.max(2, H >> 1);
-        if (!this._tmCanvas) {
-          this._tmCanvas = document.createElement('canvas');
-          this._tmCtx = this._tmCanvas.getContext('2d', { willReadFrequently: true });
+    /* 필름 그레인 — 저사양 스킵, 중사양은 2프레임당 1회 */
+    if (QUALITY.grainOn && (qLevel >= 2 || ((G.frame || 0) % 2 === 0))) {
+      outCtx.globalCompositeOperation = 'overlay';
+      outCtx.globalAlpha = 0.038;
+      const gx = -Math.random() * 160, gy = -Math.random() * 160;
+      for (let ty2 = gy; ty2 < H; ty2 += 160) {
+        for (let tx2 = gx; tx2 < W; tx2 += 160) {
+          outCtx.drawImage(this.grain, tx2, ty2);
         }
-        this._tmCanvas.width = tw; this._tmCanvas.height = th;
-        this._tmCtx.setTransform(1, 0, 0, 1, 0, 0);
-        this._tmCtx.clearRect(0, 0, tw, th);
-        this._tmCtx.drawImage(sceneCanvas, 0, 0, tw, th);
-        const img = this._tmCtx.getImageData(0, 0, tw, th);
-        const d = img.data;
-        const A = 199, B = 255;
-        for (let i = 0; i < d.length; i += 4) {
-          const l = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
-          if (l <= A) continue;
-          const t = (l - A) / (B - A);
-          const sq = 1 - Math.exp(-2.2 * t);
-          const newL = A + sq * (B - A) * 0.965;
-          const k = newL / l;
-          d[i] = Math.min(255, d[i] * k + 2);
-          d[i + 1] = Math.min(255, d[i + 1] * k + 2);
-          d[i + 2] = Math.min(255, d[i + 2] * k + 2);
-        }
-        this._tmCtx.putImageData(img, 0, 0);
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.clearRect(0, 0, sceneCanvas.width, sceneCanvas.height);
-        ctx.drawImage(this._tmCanvas, 0, 0, sceneCanvas.width, sceneCanvas.height);
-      } catch (e) {}
+      }
+      outCtx.globalAlpha = 1;
+      outCtx.globalCompositeOperation = 'source-over';
     }
+
+    /* 톤매퍼 제거됨 (2026-09 최적화):
+     * 기존 코드는 scene→화면 합성 AFTER에 sceneCanvas를 덮어써
+     * 다음 프레임 시작 시 clearRect로 버려지는 무용지물 연산이었음.
+     * 하프해상도 getImageData+전픽셀 JS루프(약 50만px/프레임)가
+     * 모바일 프레임을 반토막낸 주범. 블룸 임계값으로 하이라이트는 이미 제어됨. */
 
     /* 밤 틴트 (라이팅이 밤을 담당 — 미미하게만) */
     if (G.dayTint > 0.05) {
@@ -366,6 +351,9 @@ const LIGHTS = {
   },
   resize() {
     if (!this.canvas) return;
+    // 품질별 라이트맵 해상도 (저사양 0.33으로 필레이트 절감)
+    this.scale = (typeof QUALITY !== 'undefined' && QUALITY.level === 0) ? 0.33
+      : (typeof QUALITY !== 'undefined' && QUALITY.level === 1) ? 0.42 : 0.5;
     this.canvas.width = Math.max(2, (G.view.w * this.scale) | 0);
     this.canvas.height = Math.max(2, (G.view.h * this.scale) | 0);
   },
@@ -462,10 +450,11 @@ const LIGHTS = {
     for (const pk of G.pickups) {
       if (pk.kind === 'chest') L.push({ x: pk.x, y: pk.y, r: 110, color: '#e8b74a', a: flicker(pk.x, 0.6), bloom: 0.08 });
     }
-    // 상한: 화면 중심에서 가까운 순
-    if (L.length > 46) {
+    // 상한: 화면 중심에서 가까운 순 (품질별 차등)
+    const maxL = (typeof QUALITY !== 'undefined') ? QUALITY.maxLights : 46;
+    if (L.length > maxL) {
       L.sort((a, b) => dist2(a.x, a.y, p.x, p.y) - dist2(b.x, b.y, p.x, p.y));
-      L.length = 46;
+      L.length = maxL;
     }
 
     // 주변광(앰비언트): 밤이 어두워지고, 러시 시 따뜻해짐
@@ -508,7 +497,8 @@ const LIGHTS = {
     }
 
     /* ---------- 볼류메트릭 라이트 샤프트(모톤 베컴) ----------
-     * 화면 상단 3개의 보이지 않는 하늘 광원이 안개를 뚫고 내리꽂히는 층 */
+     * 고품질에서만: 매 프레임 3개 그라디언트 생성 비용이 큼 */
+    if (QUALITY.shaftOn) {
     const shaftT = G.time * 0.06;
     ctx.globalCompositeOperation = 'lighter';
     for (let i = 0; i < 3; i++) {
@@ -528,11 +518,14 @@ const LIGHTS = {
       ctx.fill();
     }
     ctx.globalCompositeOperation = 'source-over';
+    }
 
-    /* ---------- 볼류메트릭 먼지 (빛 속 부유 입자) ---------- */
+    /* ---------- 볼류메트릭 먼지 (빛 속 부유 입자) — 중사양 이상만 ---------- */
+    if (QUALITY.dustOn) {
     if (!this.dust) {
       this.dust = [];
-      for (let i = 0; i < 46; i++) {
+      const nDust = QUALITY.level === 1 ? 26 : 46;
+      for (let i = 0; i < nDust; i++) {
         this.dust.push({ x: rand(-1000, 1000), y: rand(-800, 800), s: rand(0.6, 2.1), ph: rand(0, TAU), sp: rand(4, 14) });
       }
     }
@@ -552,13 +545,17 @@ const LIGHTS = {
       }
     }
     ctx.globalCompositeOperation = 'source-over';
+    }
 
     /* ---------- 접촉 그림자 (2D 광원 투사) ----------
-     * 플레이어 광원 기준, 근처 적/장식 뒤로 늘어지는 타원 그림자 */
+     * 저사양은 스킵. 중/고도 최대 40마리까지만 (save/restore 비용 절감) */
+    if (QUALITY.level >= 1) {
     ctx.save();
+    let shadowCount = 0;
     for (const e of G.enemies) {
       const dd = dist(e.x, e.y, p.x, p.y);
       if (dd > 430) continue;
+      if (++shadowCount > 40) break;
       const away = Math.atan2(e.y - p.y, e.x - p.x);
       const shadowLen = clamp(1 - dd / 430, 0, 1) * e.r * 2.4;
       ctx.globalAlpha = clamp(1 - dd / 430, 0, 1) * 0.3;
@@ -572,12 +569,16 @@ const LIGHTS = {
       ctx.restore();
     }
     ctx.restore();
+    }
 
-    /* ---------- 림 라이팅: 광원 반대편 가장자리 하이라이트 ----------
-     * 광원을 등진 엔티티의 실루엣 가장자리가 하늘빛을 받아 반짝임 (3D 실루엣 라이팅의 2D 구현) */
+    /* ---------- 림 라이팅: 고품질에서만, 최대 24마리 ----------
+     * 적마다 RadialGradient 생성이 프레임당 수십 회 → 저/중사양 스킵 */
+    if (QUALITY.rimOn && QUALITY.level >= 2) {
+    let rimCount = 0;
     for (const e of G.enemies) {
       const dd = dist(e.x, e.y, p.x, p.y);
       if (dd > 420 || e.spawnT > 0) continue;
+      if (++rimCount > 24) break;
       const a = Math.atan2(e.y - p.y, e.x - p.x);
       const strength = clamp(1 - dd / 420, 0, 1) * 0.55;
       ctx.save();
@@ -594,14 +595,16 @@ const LIGHTS = {
       ctx.fill();
       ctx.restore();
     }
+    }
   },
 };
 
 /* ---------- 초기화 ---------- */
 function resize() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  canvas.width = window.innerWidth * dpr;
-  canvas.height = window.innerHeight * dpr;
+  const dprCap = (typeof QUALITY !== 'undefined' && QUALITY.dprCap) ? QUALITY.dprCap : 2;
+  const dpr = Math.min(window.devicePixelRatio || 1, dprCap);
+  canvas.width = Math.max(2, Math.round(window.innerWidth * dpr));
+  canvas.height = Math.max(2, Math.round(window.innerHeight * dpr));
   canvas.style.width = window.innerWidth + 'px';
   canvas.style.height = window.innerHeight + 'px';
   outCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -610,7 +613,11 @@ function resize() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   G.dpr = dpr;
   G.view = { w: window.innerWidth, h: window.innerHeight };
-  G.baseZoom = window.innerWidth < 720 ? 0.82 : 1;
+  // 기기별 기본 줌: 소형폰은 더 넓게, 태블릿은 중간, 데스크탑은 1
+  const minSide = Math.min(window.innerWidth, window.innerHeight);
+  G.baseZoom = window.innerWidth < 500 ? 0.72 : (window.innerWidth < 720 ? 0.82 : (window.innerWidth < 1100 ? 0.92 : 1));
+  // 세로모드(폰)에서는 시야 확보를 위해 추가 축소
+  if (window.innerHeight > window.innerWidth && minSide < 500) G.baseZoom = Math.min(G.baseZoom, 0.68);
   // 비네트 그라디언트 프리캐시
   G.vigGrad = outCtx.createRadialGradient(G.view.w / 2, G.view.h / 2, Math.min(G.view.w, G.view.h) * 0.36,
                                           G.view.w / 2, G.view.h / 2, Math.max(G.view.w, G.view.h) * 0.72);
@@ -620,6 +627,7 @@ function resize() {
   POST.resize();
 }
 window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 120));
 
 function initRun(seed) {
   G.seed = seed >>> 0;
@@ -627,6 +635,7 @@ function initRun(seed) {
   G.state = 'playing';
   G.time = 0;
   G.minute = 0;
+  G.frame = 0;
   G.hitStop = 0;
   G.enemies = [];
   G.projectiles = [];
@@ -642,6 +651,8 @@ function initRun(seed) {
   G.geysers = [];
   G.hazardT = 5;
   G.vortices = [];
+  G.orbitTrail = [];
+  G._chestQueue = 0; G._chestBest = 0;
   G.pois = [];
   G.poisCleared = new Set();
   G.visitedBiomes = new Set();
@@ -735,6 +746,7 @@ function activateRush() {
   showBanner('🔥 도파민 러시!! 🔥', '#ff4d9d');
   document.body.classList.add('rush');
   document.getElementById('rageBtn').classList.remove('ready');
+  try { if (G.vibrate) G.vibrate([30, 40, 60]); } catch (e) {}
   // 발동 폭발: 주변 적 튕겨내기 + 데미지
   if (!G.hash) buildSpatialHash();
   for (const e of queryEnemies(p.x, p.y, 220)) {
@@ -777,6 +789,7 @@ function hurtPlayer(dmg, srcX, srcY) {
   else shakeCam(3);
   POST.triggerChroma(0.3);
   SFX.play('hurt');
+  try { if (G.vibrate) G.vibrate(35); } catch (e) {}
   spawnDmgText(p.x, p.y - 24, Math.round(dmg), false, true);
   if (p.hp <= 0) { p.hp = 0; gameOver(); }
 }
@@ -883,6 +896,7 @@ function updatePlayer(dt) {
 
   // 픽업 자석 & 획득
   const magR = p.magnetR;
+  let chestVal = 0;
   for (let i = G.pickups.length - 1; i >= 0; i--) {
     const pk = G.pickups[i];
     pk.t += dt * 4;
@@ -923,8 +937,25 @@ function updatePlayer(dt) {
           break;
         }
         case 'chest':
-          openChest(pk.val);
+          // 같은 프레임 다중 상자는 합산해 한 번만 오픈 (보상 유실 방지)
+          chestVal = Math.max(chestVal, pk.val);
+          chestVal += 0; // 최고 등급 유지
+          G._chestQueue = (G._chestQueue || 0) + 1;
+          G._chestBest = Math.max(G._chestBest || 0, pk.val);
           break;
+      }
+    }
+  }
+  if (G._chestQueue > 0) {
+    const best = G._chestBest || chestVal;
+    // 추가 상자는 즉시 젬으로 전환해 유실 없이 보상
+    const extra = G._chestQueue - 1;
+    G._chestQueue = 0; G._chestBest = 0;
+    openChest(best);
+    if (extra > 0) {
+      for (let k = 0; k < extra * 6; k++) {
+        const a = Math.random() * TAU;
+        G.pickups.push({ kind: 'gem', x: p.x, y: p.y, val: 3, t: Math.random() * TAU, vx: Math.cos(a) * rand(150, 320), vy: Math.sin(a) * rand(150, 320) });
       }
     }
   }
@@ -954,7 +985,9 @@ function updateFx(dt) {
     pt.vy += (pt.grav || 0) * dt;
     pt.vx *= 0.98;
   }
-  if (G.particles.length > 700) G.particles.splice(0, G.particles.length - 700);
+  const maxP = (typeof QUALITY !== 'undefined') ? QUALITY.maxParticles : 700;
+  if (G.particles.length > maxP) G.particles.splice(0, G.particles.length - maxP);
+  if (G.dmgTexts.length > 120) G.dmgTexts.splice(0, G.dmgTexts.length - 120);
 
   // 고스트 잔상
   for (let i = G.ghosts.length - 1; i >= 0; i--) {
@@ -976,6 +1009,8 @@ function update(dt) {
   if (G.hitStop > 0) { G.hitStop -= dt; dt *= 0.12; }
   G.time += dt;
   G.minute = G.time / 60;
+  G.frame = (G.frame || 0) + 1;
+  if (typeof QUALITY !== 'undefined') QUALITY.track(dt);
 
   updatePlayer(dt);
   updateSpawns(dt);
@@ -1042,7 +1077,11 @@ function render(dt = 1 / 60) {
   MapGen.drawWorld(ctx, cam.x - shx - kx - 4, cam.y - shy - ky - 4, vw + 8, vh + 8);
 
   // 뒤 레이어 안개 (지형 위, 엔티티 아래)
+  // 저사양에서는 뒤 레이어만 그려 필레이트 절약
   MapGen.drawFog(ctx, 0);
+
+  // POI 지면 마커 (월드 탐색의 핵심 단서 — 적/픽업 아래에 배치)
+  drawPOI(ctx);
 
   // 픽업
   for (const pk of G.pickups) drawPickup(pk);
@@ -1068,9 +1107,13 @@ function render(dt = 1 / 60) {
     ctx.restore();
   }
 
-  // 적 (y 정렬)
-  const sorted = G.enemies.slice().sort((a, b) => a.y - b.y);
-  for (const e of sorted) drawEnemy(ctx, e);
+  // 적 (y 정렬) — slice() 할당 없이 제자리 정렬로 GC 압박 제거
+  // (업데이트 루프는 순서 비의존이므로 정렬해도 로직에 영향 없음)
+  G.enemies.sort((a, b) => a.y - b.y);
+  for (const e of G.enemies) drawEnemy(ctx, e);
+
+  // 상인 정령 (적 위, 플레이어 아래 — 만지면 축복 획득)
+  drawMerchant(ctx);
 
   drawPlayer();
   drawProjectiles(ctx);
@@ -1116,8 +1159,8 @@ function render(dt = 1 / 60) {
   }
   ctx.globalAlpha = 1;
 
-  // 앞 레이어 안개 (엔티티 위 — 깊이감)
-  MapGen.drawFog(ctx, 1);
+  // 앞 레이어 안개 (엔티티 위 — 깊이감, 저사양은 스킵)
+  if (QUALITY.level >= 1) MapGen.drawFog(ctx, 1);
 
   // 피해 텍스트
   ctx.textAlign = 'center';
@@ -1125,7 +1168,8 @@ function render(dt = 1 / 60) {
     const a = clamp(t.life / t.maxLife, 0, 1);
     const pop = t.scale * (1 + (1 - a) * 0.3);
     ctx.globalAlpha = a;
-    ctx.font = `900 ${Math.round(17 * pop)}px 'Segoe UI', sans-serif`;
+    // 폰트 문자열 생성 비용 절약: 크기를 정수로 양자화
+    ctx.font = `900 ${Math.round(17 * pop)}px 'Segoe UI',sans-serif`;
     ctx.lineWidth = 3.5;
     ctx.strokeStyle = 'rgba(0,0,0,0.7)';
     if (t.isPlayer) {
@@ -1496,19 +1540,33 @@ function victory() { endScreen(true); }
 /* ---------- 입력 ---------- */
 G.keys = new Set();
 window.addEventListener('keydown', (e) => {
+  // 한글 IME 조합 중 오작동 방지 + 스페이스 스크롤 방지
+  if (e.isComposing) return;
   G.keys.add(e.code);
   if (e.code === 'Space') {
     e.preventDefault();
+    // 버튼 포커스 상태 스페이스 중복 발동 방지
+    if (document.activeElement && document.activeElement.tagName === 'BUTTON') document.activeElement.blur();
     activateRush();
   }
   if (e.code === 'Escape' || e.code === 'KeyP') togglePause();
+  if (e.code === 'KeyM') { try { SFX.init(); SFX.setMuted(!SFX.muted); document.getElementById('muteBtn').textContent = SFX.muted ? '🔇' : '🔊'; } catch (err) {} }
   if (G.state === 'levelup') {
     const n = parseInt(e.key, 10);
     if (n >= 1 && n <= 3 && G.luChoices && G.luChoices[n - 1]) pickCard(G.luChoices[n - 1]);
+  } else if (G.state === 'chest') {
+    if (e.code === 'Enter' || e.code === 'Space') {
+      const done = document.getElementById('ch-done');
+      if (done && !done.classList.contains('hidden')) done.click();
+    }
+  } else if (G.state === 'title' && e.code === 'Enter') {
+    const st = document.getElementById('btn-start');
+    if (st) st.click();
   }
 });
 window.addEventListener('keyup', (e) => G.keys.delete(e.code));
-window.addEventListener('blur', () => { if (G.state === 'playing') togglePause(); });
+window.addEventListener('blur', () => { G.keys.clear(); if (G.state === 'playing') togglePause(); });
+document.addEventListener('visibilitychange', () => { G.keys.clear(); if (document.hidden && G.state === 'playing') togglePause(); });
 
 function togglePause() {
   if (G.state === 'playing') {
@@ -1520,17 +1578,29 @@ function togglePause() {
   }
 }
 
-/* 터치 조이스틱 */
+/* 터치 조이스틱 — UI 버튼/패널 위 터치는 이동으로 오인하지 않음 */
 G.joy = { active: false, dx: 0, dy: 0, id: null, ox: 0, oy: 0 };
 const joyEl = document.getElementById('joystick');
+function isUiTouch(target) {
+  if (!target || !target.closest) return false;
+  return !!target.closest('button,input,.panel,.overlay,#rageBtn,.iconbtn');
+}
 window.addEventListener('touchstart', (e) => {
+  // iOS 오디오 언락 (첫 터치에 재개)
+  try { if (SFX.ctx && SFX.ctx.state === 'suspended') SFX.ctx.resume(); } catch (err) {}
   for (const t of e.changedTouches) {
-    if (t.clientY > window.innerHeight * 0.28 && !G.joy.active) {
+    if (G.joy.active) continue;
+    const el = document.elementFromPoint(t.clientX, t.clientY);
+    if (isUiTouch(el || e.target)) continue;
+    if (G.state !== 'playing') continue;
+    if (t.clientY > window.innerHeight * 0.28) {
       G.joy.active = true; G.joy.id = t.identifier;
       G.joy.ox = t.clientX; G.joy.oy = t.clientY;
+      G.joy.dx = 0; G.joy.dy = 0;
       joyEl.style.left = t.clientX + 'px';
       joyEl.style.top = t.clientY + 'px';
       joyEl.classList.add('on');
+      joyEl.firstElementChild.style.transform = 'translate(0,0)';
     }
   }
 }, { passive: true });
@@ -1544,9 +1614,10 @@ window.addEventListener('touchmove', (e) => {
       G.joy.dy = (dy / d) * (cl / 55);
       const knob = joyEl.firstElementChild;
       knob.style.transform = `translate(${dx / d * cl}px, ${dy / d * cl}px)`;
+      if (G.state === 'playing') e.preventDefault();
     }
   }
-}, { passive: true });
+}, { passive: false });
 window.addEventListener('touchend', (e) => {
   for (const t of e.changedTouches) {
     if (t.identifier === G.joy.id) {
@@ -1555,6 +1626,27 @@ window.addEventListener('touchend', (e) => {
       joyEl.firstElementChild.style.transform = 'translate(0,0)';
     }
   }
+}, { passive: true });
+window.addEventListener('touchcancel', (e) => {
+  for (const t of e.changedTouches) {
+    if (t.identifier === G.joy.id) {
+      G.joy.active = false; G.joy.dx = 0; G.joy.dy = 0; G.joy.id = null;
+      joyEl.classList.remove('on');
+    }
+  }
+}, { passive: true });
+// 핀치줌 제스처로 게임 줌 연동 (모바일 시야 조절)
+let _pinchD = 0;
+window.addEventListener('touchmove', (e) => {
+  if (e.touches && e.touches.length === 2 && (G.state === 'playing' || G.state === 'paused')) {
+    const a = e.touches[0], b = e.touches[1];
+    const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    if (_pinchD > 0) {
+      const f = d / _pinchD;
+      if (f > 1.02 || f < 0.98) G.userZoom = clamp((G.userZoom || 1) * f, 0.55, 1.8);
+    }
+    _pinchD = d;
+  } else _pinchD = 0;
 }, { passive: true });
 
 /* 휠 줌 */
@@ -1568,11 +1660,14 @@ window.addEventListener('wheel', (e) => {
 let lastT = 0;
 function loop(t) {
   requestAnimationFrame(loop);
+  if (!lastT) lastT = t;
   const dt = Math.min((t - lastT) / 1000, 0.05);
   lastT = t;
+  if (!isFinite(dt) || dt < 0) return;
   if (G.state === 'playing') update(dt);
+  else if (typeof QUALITY !== 'undefined') QUALITY.track(dt);
   if (G.state === 'playing' || G.state === 'levelup' || G.state === 'chest' || G.state === 'paused' || G.state === 'gameover' || G.state === 'victory') {
-    if (G.camera) render();
+    if (G.camera) render(dt);
   }
   if (G.state === 'title') renderTitle(t);
 }
@@ -2047,13 +2142,45 @@ function bindUI() {
   setMuteIcon();
   document.getElementById('pauseBtn').onclick = togglePause;
   document.getElementById('rageBtn').onclick = activateRush;
+  // 품질 전환 버튼 (HUD): 2→0→1→2 순환
+  const qBtn = document.getElementById('qualityBtn');
+  const qIcons = ['🥔', '⚖️', '✨'];
+  const refreshQ = () => {
+    if (qBtn) qBtn.textContent = qIcons[QUALITY.level] || '✨';
+    document.querySelectorAll('.q-seg button').forEach(b => {
+      b.classList.toggle('sel', parseInt(b.dataset.q, 10) === QUALITY.level);
+    });
+  };
+  const applyQFog = () => {
+    // 실행 중 품질 변경 시 안개 개수 즉시 조정 (위치 유지)
+    try {
+      if (G.player && MapGen.fog) {
+        const want = QUALITY.level === 0 ? 4 : (QUALITY.level === 1 ? 6 : 8);
+        while (MapGen.fog.length > want) MapGen.fog.pop();
+        while (MapGen.fog.length < want) MapGen.fog.push({ x: G.player.x + rand(-800, 800), y: G.player.y + rand(-800, 800), r: rand(280, 620), a: rand(0.035, 0.085), vx: rand(6, 22), vy: rand(-8, 8), layer: MapGen.fog.length % 2 });
+      }
+    } catch (e) {}
+  };
+  if (qBtn) qBtn.onclick = () => { QUALITY.setLevel((QUALITY.level + 2) % 3); refreshQ(); applyQFog(); showBanner(['🥔 절전 모드', '⚖️ 균형 모드', '✨ 고품질 모드'][QUALITY.level], '#4de3ff'); };
+  document.querySelectorAll('.q-seg button').forEach(b => {
+    b.onclick = (e) => { e.stopPropagation(); QUALITY.setLevel(parseInt(b.dataset.q, 10)); refreshQ(); applyQFog(); };
+  });
+  refreshQ();
+  // 햅틱 헬퍼 (모바일 타격감)
+  G.vibrate = (ms) => { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {} };
 
   const best = localStorage.getItem('ds_best');
   if (best) document.getElementById('bestScore').textContent = '🏅 최고 기록: ' + parseInt(best, 10).toLocaleString();
+  // 랜딩 페이지(?seed=) 딥링크 지원: 시드 자동 입력
+  try {
+    const q = new URLSearchParams(location.search).get('seed');
+    if (q) document.getElementById('seedInput').value = q.slice(0, 20);
+  } catch (e) {}
 }
 
 /* ---------- 부팅 ---------- */
 window.addEventListener('load', () => {
+  if (typeof QUALITY !== 'undefined') QUALITY.detect();
   resize();
   LIGHTS.init();
   POST.init();

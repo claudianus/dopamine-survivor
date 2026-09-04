@@ -16,14 +16,21 @@
 
 html, body {
   width: 100%; height: 100%;
+  height: 100dvh; /* 모바일 브라우저 UI 대응 */
   overflow: hidden;
   background: var(--bg);
   font-family: 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
   touch-action: none;
+  overscroll-behavior: none; /* 당겨서 새로고침/바운스 방지 */
   -webkit-user-select: none; user-select: none;
+  -webkit-tap-highlight-color: transparent; /* 모바일 탭 하이라이트 제거 */
+  -webkit-text-size-adjust: 100%;
 }
 
-#game { position: fixed; inset: 0; display: block; }
+#game {
+  position: fixed; inset: 0; display: block;
+  touch-action: none;
+}
 
 .hidden { display: none !important; }
 
@@ -506,21 +513,85 @@ body.rush #game { filter: saturate(1.45) contrast(1.07); }
 #end-stats b { color: #e8f0fa; }
 #end-stats b.gold { color: var(--gold); font-size: 15px; }
 
+/* 품질 선택 세그먼트 */
+.quality-row {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  margin-bottom: 14px; color: rgba(170,190,212,0.7); font-size: 12px; letter-spacing: 1px;
+}
+.q-label { font-weight: 800; }
+.q-seg { display: flex; gap: 6px; }
+.q-seg button {
+  width: 44px; height: 36px; font-size: 17px; cursor: pointer;
+  background: rgba(255,255,255,0.05); border: 1px solid var(--line); border-radius: 4px;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  touch-action: manipulation;
+}
+.q-seg button:hover { background: rgba(77,227,255,0.12); }
+.q-seg button.sel { border-color: var(--gold); background: rgba(232,183,74,0.16); box-shadow: 0 0 10px rgba(232,183,74,0.35); }
+.q-seg.small button { width: 40px; height: 32px; font-size: 15px; }
+.q-auto { font-size: 10px; color: rgba(125,255,160,0.7); }
+.pause-quality { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 12px; color: rgba(170,190,212,0.75); font-size: 12px; }
+.howto-mobile { display: none; }
+.howto-tip { color: rgba(232,183,74,0.75); font-size: 11.5px; }
+@media (pointer: coarse) {
+  .howto-pc { display: none; }
+  .howto-mobile { display: block; }
+}
+
+/* 품질 버튼 (HUD) */
+#qualityBtn { bottom: 98px; right: 10px; }
+
 /* 모바일 */
 @media (max-width: 720px) {
   #timer { font-size: 20px; letter-spacing: 3px; }
-  #minimap { width: 96px; height: 96px; top: 50px; }
+  #minimap { width: 96px; height: 96px; top: calc(50px + env(safe-area-inset-top, 0px)); }
   #combo { bottom: 118px; right: 8px; font-size: 16px; }
   .slot { width: 36px; height: 40px; font-size: 14px; }
-  #bottombar { bottom: 6px; gap: 6px; }
-  .lu-card { width: 138px; min-height: 175px; }
+  #bottombar { bottom: calc(6px + env(safe-area-inset-bottom, 0px)); gap: 6px; max-width: 96vw; }
+  .lu-card { width: min(138px, 28vw); min-height: 175px; }
   #end-stats { grid-template-columns: 1fr; }
   .title-panel { padding: 24px 20px; }
-  #muteBtn { bottom: auto; top: 16px; right: 10px; }
-  #pauseBtn { bottom: auto; top: 60px; right: 10px; }
-  #rageBtn { right: 10px; bottom: 150px; }
+  #muteBtn { bottom: auto; top: calc(16px + env(safe-area-inset-top, 0px)); right: calc(10px + env(safe-area-inset-right, 0px)); }
+  #pauseBtn { bottom: auto; top: calc(60px + env(safe-area-inset-top, 0px)); right: calc(10px + env(safe-area-inset-right, 0px)); }
+  #qualityBtn { bottom: auto; top: calc(104px + env(safe-area-inset-top, 0px)); right: calc(10px + env(safe-area-inset-right, 0px)); }
+  #rageBtn {
+    right: calc(10px + env(safe-area-inset-right, 0px));
+    bottom: calc(150px + env(safe-area-inset-bottom, 0px));
+    width: 68px; height: 68px; font-size: 28px;
+    touch-action: manipulation;
+  }
   #topstats { top: 38px; right: 58px; }
-  #ragebar, #hpbar { width: 40vw; }
+  #ragebar, #hpbar { width: 40vw; min-width: 140px; }
+  .btn { min-height: 48px; } /* 터치 타깃 44px+ 확보 */
+  .lu-card { min-height: 185px; padding: 20px 12px 16px; }
+  #seedInput { font-size: 16px; } /* iOS 자동줌 방지 */
+}
+
+/* 태블릿 (721~1100px): 폰과 데스크탑 사이 균형 */
+@media (min-width: 721px) and (max-width: 1100px) {
+  #minimap { width: 112px; height: 112px; }
+  .slot { width: 42px; height: 46px; font-size: 17px; }
+  #ragebar, #hpbar { width: min(260px, 30vw); }
+  .lu-card { width: 168px; }
+  #questPanel { max-width: 260px; }
+  #rageBtn { right: 16px; bottom: 130px; width: 64px; height: 64px; }
+}
+
+/* 데스크탑 대형 화면: HUD 여백 확장 */
+@media (min-width: 1400px) {
+  #minimap { width: 148px; height: 148px; }
+  #timer { font-size: 32px; }
+}
+
+/* 가로모드 소형폰: 하단바 겹침 방지 */
+@media (max-height: 500px) and (orientation: landscape) {
+  #bottombar { gap: 4px; bottom: 4px; }
+  #ragebar, #hpbar { height: 12px; width: 30vw; }
+  #hpbar { height: 14px; }
+  #minimap { width: 80px; height: 80px; top: 46px; }
+  #questPanel { top: 70px; min-width: 160px; padding: 5px 8px; }
+  #combo { bottom: 90px; }
+  #rageBtn { bottom: 96px; width: 56px; height: 56px; }
 }
 
 /* 퀘스트 패널 */

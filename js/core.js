@@ -117,41 +117,121 @@ function zoomPunchCam(amount) {
 }
 
 /* ============================================================
+ * 적응형 품질 시스템 — 기기/프레임레이트 기반 자동 스케일링
+ * quality: 0=저사양(모바일 절전) / 1=균형 / 2=고품질(데스크탑)
+ * ============================================================ */
+const QUALITY = {
+  level: 2,
+  fpsEMA: 60,
+  lastSwitch: 0,
+  detect() {
+    const ua = navigator.userAgent || '';
+    const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+    const small = Math.min(window.innerWidth, window.innerHeight) < 500;
+    const cores = navigator.hardwareConcurrency || 4;
+    if (mobile || small || cores <= 4) this.level = 1;
+    if ((mobile && small) || cores <= 2) this.level = 0;
+    // 고해상도 데스크탑은 고품질 유지
+    if (!mobile && Math.min(window.innerWidth, window.innerHeight) >= 700 && cores > 4) this.level = 2;
+    try {
+      const saved = localStorage.getItem('ds_quality');
+      if (saved === '0' || saved === '1' || saved === '2') this.level = parseInt(saved, 10);
+    } catch (e) {}
+    this.applyDprCap();
+  },
+  applyDprCap() {
+    // 저사양은 DPR을 낮춰 필레이트 병목을 제거
+    this.dprCap = this.level === 0 ? 1.25 : (this.level === 1 ? 1.6 : 2);
+  },
+  // 매 프레임 FPS를 추적해 자동 승/강급 (0.5초 쿨다운, 타이틀 제외)
+  track(dt) {
+    if (!dt || dt <= 0) return;
+    const fps = 1 / Math.min(dt, 0.1);
+    this.fpsEMA = this.fpsEMA * 0.95 + fps * 0.05;
+    const now = performance.now();
+    if (now - this.lastSwitch < 2500 || !G.state || G.state !== 'playing') return;
+    if (this.fpsEMA < 38 && this.level > 0) { this.setLevel(this.level - 1); }
+    else if (this.fpsEMA > 55 && this.level < 2 && now - this.lastSwitch > 12000) { this.setLevel(this.level + 1); }
+  },
+  setLevel(lv) {
+    this.level = lv;
+    this.lastSwitch = performance.now();
+    this.applyDprCap();
+    try { localStorage.setItem('ds_quality', String(lv)); } catch (e) {}
+    if (typeof resize === 'function') { try { resize(); } catch (e) {} }
+  },
+  get maxParticles() { return this.level === 0 ? 320 : (this.level === 1 ? 500 : 700); },
+  get maxLights() { return this.level === 0 ? 22 : (this.level === 1 ? 34 : 46); },
+  get maxEnemies() { return this.level === 0 ? 90 : (this.level === 1 ? 130 : 160); },
+  get bloomOn() { return true; },
+  get streakOn() { return this.level >= 1; },
+  get grainOn() { return this.level >= 1; },
+  get shaftOn() { return this.level >= 2; },
+  get dustOn() { return this.level >= 1; },
+  get rimOn() { return this.level >= 1; },
+};
+
+/* ============================================================
  * 글로우 스프라이트 캐시 — 기술 데모급 발광을 저렴하게
+ * (동적 hsl 양자화 + LRU 상한으로 캐시 폭발 방지)
  * ============================================================ */
 const Glow = {
   cache: new Map(),
+  MAX: 96,
+  // 매 프레임 변하는 hue를 12단계로 양자화해 캐시 키 폭발 방지
+  key(color) {
+    if (typeof color !== 'string') return '#ffffff';
+    const m = /^hsla?\((\d+(?:\.\d+)?),\s*(\d+)%?,\s*(\d+)%?/.exec(color);
+    if (m) {
+      const h = Math.round(parseFloat(m[1]) / 30) * 30 % 360;
+      return `hsl(${h},${m[2]}%,${m[3]}%)`;
+    }
+    if (color.length === 4 && color[0] === '#') {
+      return '#' + color[1] + color[1] + color[2] + color[2] + color[3] + color[3];
+    }
+    return color;
+  },
   midColor(color) {
     // 어떤 색 형식이든 반투명 중간 색으로 변환
     if (color.startsWith('hsl(')) return color.replace('hsl(', 'hsla(').replace(')', ',0.45)');
     if (color.startsWith('hsla(') || color.startsWith('rgba(')) return color;
     if (color.startsWith('rgb(')) return color.replace('rgb(', 'rgba(').replace(')', ',0.45)');
-    if (color.startsWith('#')) {
+    if (color.startsWith('#') && color.length >= 7) {
       const r = parseInt(color.slice(1, 3), 16), g2 = parseInt(color.slice(3, 5), 16), b = parseInt(color.slice(5, 7), 16);
-      return `rgba(${r},${g2},${b},0.45)`;
+      if (!isNaN(r) && !isNaN(g2) && !isNaN(b)) return `rgba(${r},${g2},${b},0.45)`;
     }
     return color;
   },
   get(color) {
-    let c = this.cache.get(color);
-    if (c) return c;
+    const k = this.key(color);
+    let c = this.cache.get(k);
+    if (c) { // LRU: 최근 사용을 뒤로
+      this.cache.delete(k); this.cache.set(k, c);
+      return c;
+    }
     c = document.createElement('canvas');
     c.width = 64; c.height = 64;
     const x = c.getContext('2d');
     const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
-    g.addColorStop(0, color);
-    g.addColorStop(0.35, this.midColor(color));
+    g.addColorStop(0, k);
+    g.addColorStop(0.35, this.midColor(k));
     g.addColorStop(1, 'rgba(0,0,0,0)');
     x.fillStyle = g;
     x.fillRect(0, 0, 64, 64);
-    this.cache.set(color, c);
+    this.cache.set(k, c);
+    if (this.cache.size > this.MAX) {
+      const oldest = this.cache.keys().next().value;
+      this.cache.delete(oldest);
+    }
     return c;
   },
   draw(ctx, color, x, y, radius, alpha = 1) {
+    if (radius <= 0 || alpha <= 0.01) return;
     const s = this.get(color);
-    ctx.globalAlpha = alpha;
+    const prev = ctx.globalAlpha;
+    ctx.globalAlpha = prev * alpha;
     ctx.drawImage(s, x - radius, y - radius, radius * 2, radius * 2);
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = prev;
   },
 };
 

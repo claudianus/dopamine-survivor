@@ -690,16 +690,17 @@ function drawProjectiles(ctx) {
   if (G.weapons.orbit) {
     const lv = wstats('orbit', G.weapons.orbit);
     const evolved = G.weapons.orbit.evolved;
-    // 애프터이미지 궤적 (기록 → 페이드 렌더)
+    // 애프터이미지 궤적 (기록 → 페이드 렌더, 만료분 제거로 메모리 고정)
     if (!G.orbitTrail) G.orbitTrail = [];
-    G.orbitTrail.push({ a: G.orbitAngle * lv.spd / 3, t: 0.22, count: lv.count, r: lv.r });
+    G.orbitTrail.push({ a: G.orbitAngle * lv.spd / 3, t: 0.22 });
     if (G.orbitTrail.length > 10) G.orbitTrail.shift();
-    for (const tr of G.orbitTrail) {
+    for (let ti = G.orbitTrail.length - 1; ti >= 0; ti--) {
+      const tr = G.orbitTrail[ti];
       tr.t -= 1 / 60;
-      if (tr.t <= 0 || tr.r === lv.r - 0) { /* keep */ }
+      if (tr.t <= 0) { G.orbitTrail.splice(ti, 1); continue; }
       const fade = Math.max(0, tr.t / 0.22) * 0.25;
       if (fade <= 0.01) continue;
-      ctx.strokeStyle = evolved ? `rgba(255,210,63,${fade})` : `rgba(140,220,255,${fade})`;
+      ctx.strokeStyle = evolved ? `rgba(255,210,63,${fade.toFixed(3)})` : `rgba(140,220,255,${fade.toFixed(3)})`;
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.arc(p.x, p.y, lv.r, tr.a - 0.5, tr.a + 0.1);

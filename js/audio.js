@@ -75,16 +75,29 @@ const SFX = {
     o.start(t0); o.stop(t0 + dur + 0.03);
   },
 
-  /* 노이즈 버스트 */
+  /* 노이즈 버스트 — 1초 공용 버퍼 재사용으로 매 호출 Buffer 할당/GC 제거 */
+  _noiseBuf: null,
+  _noiseBufLen: 0,
   noise(dur = 0.3, vol = 0.25, freq = 800, delay = 0, panNode = null, type = 'lowpass') {
     if (!this.ctx || this.muted) return;
+    // 과도한 동시 노이즈로 인한 CPU 폭주 방지 (최대 12개)
+    this._noiseCount = (this._noiseCount || 0) + 1;
+    if (this._noiseCount > 12) { this._noiseCount--; return; }
+    setTimeout(() => { this._noiseCount = Math.max(0, (this._noiseCount || 1) - 1); }, dur * 1000 + 60);
     const t0 = this.ctx.currentTime + delay;
-    const len = Math.max(1, (dur * this.ctx.sampleRate) | 0);
-    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
-    const d = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    const need = Math.max(1, (1.0 * this.ctx.sampleRate) | 0);
+    if (!this._noiseBuf || this._noiseBufLen !== need) {
+      try {
+        this._noiseBuf = this.ctx.createBuffer(1, need, this.ctx.sampleRate);
+        const dd = this._noiseBuf.getChannelData(0);
+        for (let i = 0; i < need; i++) dd[i] = Math.random() * 2 - 1;
+        this._noiseBufLen = need;
+      } catch (e) { return; }
+    }
     const src = this.ctx.createBufferSource();
-    src.buffer = buf;
+    src.buffer = this._noiseBuf;
+    src.loop = true;
+    src.playbackRate.value = 0.9 + Math.random() * 0.2;
     const f = this.ctx.createBiquadFilter();
     f.type = type;
     f.frequency.setValueAtTime(freq, t0);
@@ -93,7 +106,8 @@ const SFX = {
     g.gain.setValueAtTime(vol, t0);
     g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
     src.connect(f); f.connect(g); g.connect(panNode || this.master);
-    src.start(t0);
+    try { src.start(t0, Math.random() * 0.5, dur + 0.05); src.stop(t0 + dur + 0.08); }
+    catch (e) { try { src.start(t0); } catch (e2) {} }
   },
 
   play(name, x) {

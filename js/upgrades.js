@@ -244,6 +244,10 @@ function openChest(val) {
     document.getElementById('overlay-chest').classList.add('hidden');
     document.getElementById('ch-result').textContent = '';
     if (G.state === 'chest') G.state = 'playing';
+    // 상자 중 적립된 레벨업이 있으면 즉시 오픈 (유실 방지)
+    try { if (G.pendingLevelUps > 0 && G.state === 'playing') setTimeout(openLevelUp, 60); } catch (e) {}
+    // 모바일 햅틱
+    try { if (navigator.vibrate) navigator.vibrate(20); } catch (e) {}
   };
 }
 

@@ -114,7 +114,8 @@ function updateSpawns(dt) {
     3: m < 4 ? 0 : Math.min(1 + (m - 4) * 0.8, 9),
     4: m < 8 ? 0 : Math.min(0.8 + (m - 8) * 0.55, 5),   // 8분부터 후반 군단
   };
-  const target = Math.min(14 + m * 13, 160);
+  const maxE = (typeof QUALITY !== 'undefined') ? QUALITY.maxEnemies : 160;
+  const target = Math.min(14 + m * 13, maxE);
   G.spawnAcc += dt;
   const interval = 0.22;
   while (G.spawnAcc > interval) {
@@ -396,9 +397,10 @@ function updateEnemies(dt) {
       // (AI는 기본 추격, 아머 판정은 damageEnemy에서 처리)
 
       // 광산 도적: 플레이어에게서 도망! 잡으면 젬 대량 드롭
+      // (실제 방향 반전은 아래 이동 벡터 계산 후 e._flee 플래그로 처리 — TDZ 방지)
       if (e.type === 'thief') {
         sp *= 1 + Math.sin(e.wobble * 0.6) * 0.08; // 흐느적거리는 도주
-        mvx = -mvx; mvy = -mvy;
+        e._flee = true;
         // 도주 중 반짝이 젬 흘리기
         if (Math.random() < dt * 3) {
           G.particles.push({ x: e.x, y: e.y, vx: rand(-30, 30), vy: rand(-40, 0), life: 0.5, maxLife: 0.5, size: 2.5, color: '#ffe9a8', grav: 60, shape: 'spark' });
@@ -466,6 +468,7 @@ function updateEnemies(dt) {
 
       // 이동 (박쥐/정령은 지그재그)
       let mvx = dx / d, mvy = dy / d;
+      if (e._flee) { mvx = -mvx; mvy = -mvy; } // 도적 도망
       if (e.type === 'bat' || e.type === 'wisp') {
         const wob = Math.sin(e.wobble * 1.7) * 0.8;
         const px2 = -mvy, py2 = mvx;

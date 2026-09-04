@@ -409,7 +409,10 @@ const MapGen = {
   /* ---------- 시네마틱 안개 레이어 ---------- */  fog: [],
   initFog() {
     this.fog = [];
-    for (let i = 0; i < 8; i++) {
+    // 품질별 안개 개수 (저사양 4개로 필레이트 절감)
+    const n = (typeof QUALITY !== 'undefined' && QUALITY.level === 0) ? 4
+      : (typeof QUALITY !== 'undefined' && QUALITY.level === 1) ? 6 : 8;
+    for (let i = 0; i < n; i++) {
       this.fog.push({
         x: rand(-800, 800), y: rand(-800, 800),
         r: rand(280, 620), a: rand(0.035, 0.085),
@@ -436,19 +439,24 @@ const MapGen = {
     }
   },
 
-  /* 미니맵: 주변 바이옴 + 엔티티 점 (0.7초 캐시) */  drawMinimap(mctx, W, px, py, enemies, boss) {
+  /* 미니맵: 주변 바이옴 + 엔티티 점 (품질별 캐시 0.7s/1.0s/1.4s, 저사양 4px 스텝) */
+  drawMinimap(mctx, W, px, py, enemies, boss) {
     const now = performance.now();
-    if (!this.mmCache || now - this.mmTime > 700) {
+    const qLv = (typeof QUALITY !== 'undefined') ? QUALITY.level : 2;
+    const cacheMs = qLv === 0 ? 1400 : (qLv === 1 ? 1000 : 700);
+    const step = qLv === 0 ? 4 : 2;
+    if (!this.mmCache || now - this.mmTime > cacheMs || this.mmCache.width !== W) {
       this.mmTime = now;
       if (!this.mmCache) { this.mmCache = document.createElement('canvas'); this.mmCache.width = W; this.mmCache.height = W; }
+      else if (this.mmCache.width !== W) { this.mmCache.width = W; this.mmCache.height = W; }
       const cctx = this.mmCache.getContext('2d');
       const scale = 26; // 1px = 26 world px
       const ox = px / scale - W / 2, oy = py / scale - W / 2;
-      for (let y = 0; y < W; y += 2) {
-        for (let x = 0; x < W; x += 2) {
+      for (let y = 0; y < W; y += step) {
+        for (let x = 0; x < W; x += step) {
           const b = this.biome(Math.floor((ox + x) * scale / TILE), Math.floor((oy + y) * scale / TILE));
           cctx.fillStyle = `rgb(${BIOME_INFO[b].base.join(',')})`;
-          cctx.fillRect(x, y, 2, 2);
+          cctx.fillRect(x, y, step, step);
         }
       }
     }
