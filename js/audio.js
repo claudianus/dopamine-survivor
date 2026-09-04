@@ -85,7 +85,8 @@ const SFX = {
     } catch (e) { /* 오디오 미지원 */ }
   },
 
-  /* 샘플 비동기 로드 — 실패해도 신스 폴백이 있으므로 게임은 항상 정상 동작 */
+  /* 샘플 비동기 로드 — 디코드 즉시 피크 스캔으로 볼륨 정규화 계수 확정.
+   * 실패해도 신스 폴백이 있으므로 게임은 항상 정상 동작 */
   loadSamples() {
     if (!this.ctx || this._samplesLoading) return;
     this._samplesLoading = true;
@@ -94,22 +95,32 @@ const SFX = {
       try {
         fetch(url).then(r => { if (!r.ok) throw 0; return r.arrayBuffer(); })
           .then(ab => this.ctx.decodeAudioData(ab))
-          .then(buf => { this.samples[name] = buf; })
+          .then(buf => {
+            // 피크 스캔 (매 7번째 샘플로 고속 측정)
+            let peak = 0;
+            const ch0 = buf.getChannelData(0);
+            for (let i = 0; i < ch0.length; i += 7) {
+              const v = Math.abs(ch0[i]);
+              if (v > peak) peak = v;
+            }
+            this.samples[name] = { buf, peak: peak || 1 };
+          })
           .catch(() => { /* 폴백: 신스 유지 */ });
       } catch (e) {}
     }
   },
 
-  /* 샘플 재생 — rate 랜덤화로 기계적 반복감 제거, pan/verb 지원 */
+  /* 샘플 재생 — rate 랜덤화로 기계적 반복감 제거, pan/verb 지원.
+   * 저장된 피크 기준 -3dBFS 타깃 정규화로 팩 내 편차 흡수 (아트 trim은 vol). */
   playSample(name, vol = 0.5, rate = 1, panNode = null, verbAmt = 0.4) {
-    const buf = this.samples[name];
-    if (!buf || !this.ctx || this.muted) return false;
+    const entry = this.samples[name];
+    if (!entry || !this.ctx || this.muted) return false;
     try {
       const src = this.ctx.createBufferSource();
-      src.buffer = buf;
+      src.buffer = entry.buf;
       src.playbackRate.value = rate * (0.96 + Math.random() * 0.08);
       const g = this.ctx.createGain();
-      g.gain.value = vol;
+      g.gain.value = vol * Math.min(1, 0.7 / (entry.peak || 1));
       src.connect(g); g.connect(panNode || this.master);
       if (this.verb && verbAmt > 0) {
         const s = this.ctx.createGain();
@@ -209,7 +220,7 @@ const SFX = {
       case 'gem':     if (this.throttle('gem', 35)) { if (!this.playSample('gem', 0.4, 1, P, 0.25)) { this.tone(1240 + Math.random() * 140, 0.08, 'sine', 0.2, 260, 0, P); this.tone(1860, 0.1, 'sine', 0.1, 300, 0.04, P); } } break;
       case 'heal':    this.tone(520, 0.12, 'sine', 0.28, 260); this.tone(784, 0.16, 'sine', 0.2, 260, 0.09); this.tone(1046, 0.2, 'sine', 0.14, 0, 0.18); break;
       case 'magnet':  this.tone(300, 0.3, 'sine', 0.3, 980); this.noise(0.25, 0.1, 2000, 0, null, 'highpass'); break;
-      case 'hurt':    this.tone(130, 0.22, 'sawtooth', 0.42, -70); this.tone(65, 0.28, 'sine', 0.4, -20); this.noise(0.16, 0.26, 700); this.playSample('hurt', 0.6, 0.9, null, 0.4); break;
+      case 'hurt':    this.tone(130, 0.22, 'sawtooth', 0.42, -70); this.tone(65, 0.28, 'sine', 0.4, -20); this.noise(0.16, 0.26, 700); this.playSample('hurt', 0.6, 0.72, null, 0.4); break;
       case 'levelup':
         this.playSample('levelup', 0.55, 1, null, 0.5);
         [523, 659, 784, 1046].forEach((f, i) => { this.tone(f, 0.2, 'sawtooth', 0.14, 0, i * 0.07); this.tone(f * 2, 0.16, 'sine', 0.08, 0, i * 0.07); });
@@ -228,6 +239,7 @@ const SFX = {
         this.tone(55, 1.2, 'sawtooth', 0.4, 24); this.tone(41, 1.4, 'square', 0.28, 14, 0.12);
         this.noise(1.1, 0.16, 300);
         this.tone(110, 0.9, 'sawtooth', 0.16, 220, 0.15);
+        this.playSample('boom', 0.7, 0.5, null, 0.6); // 저피치 폭발로 포효 바디
         break;
       case 'combo':   this.tone(680, 0.1, 'square', 0.2, 360); this.tone(1020, 0.12, 'square', 0.14, 480, 0.07); this.tone(1360, 0.1, 'sine', 0.1, 0, 0.13); break;
       case 'gameover':

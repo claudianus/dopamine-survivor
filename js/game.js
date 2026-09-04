@@ -828,11 +828,11 @@ function updatePlayer(dt) {
     G.visitedBiomes.add(props.biome);
     G.stats.regions = G.visitedBiomes.size;
     const n = G.visitedBiomes.size, m = G.minute;
-    // 젬 분수 + 게이지 + 회복
-    const cnt = 8 + ((m * 2) | 0);
+    // 젬은 잔돈만 (초반 레벨 곡선 보호: 첫 발견 ≈ 1레벨 이하)
+    const cnt = 3 + ((m * 0.5) | 0);
     for (let i = 0; i < cnt; i++) {
       const a = Math.random() * TAU;
-      G.pickups.push({ kind: 'gem', x: p.x, y: p.y, val: 2, t: Math.random() * TAU, vx: Math.cos(a) * rand(150, 320), vy: Math.sin(a) * rand(150, 320) });
+      G.pickups.push({ kind: 'gem', x: p.x, y: p.y, val: choice([1, 1, 2]), t: Math.random() * TAU, vx: Math.cos(a) * rand(150, 320), vy: Math.sin(a) * rand(150, 320) });
     }
     G.rage.value = Math.min(G.rage.max, G.rage.value + 25);
     p.hp = Math.min(p.maxHp, p.hp + p.maxHp * 0.1);
@@ -923,7 +923,6 @@ function updatePlayer(dt) {
 
   // 픽업 자석 & 획득
   const magR = p.magnetR;
-  let chestVal = 0;
   for (let i = G.pickups.length - 1; i >= 0; i--) {
     const pk = G.pickups[i];
     pk.t += dt * 4;
@@ -965,16 +964,17 @@ function updatePlayer(dt) {
         }
         case 'chest':
           // 같은 프레임 다중 상자는 합산해 한 번만 오픈 (보상 유실 방지)
-          chestVal = Math.max(chestVal, pk.val);
-          chestVal += 0; // 최고 등급 유지
           G._chestQueue = (G._chestQueue || 0) + 1;
           G._chestBest = Math.max(G._chestBest || 0, pk.val);
           break;
       }
+      // 젬이 레벨업을 열었으면 남은 픽업은 다음 프레임에 (오버레이 겹침 방지)
+      if (G.state !== 'playing') break;
     }
   }
-  if (G._chestQueue > 0) {
-    const best = G._chestBest || chestVal;
+  // 상자는 루프 종료 후, playing일 때만 오픈 (레벨업 오버레이와 상호배제)
+  if ((G._chestQueue || 0) > 0 && G.state === 'playing') {
+    const best = G._chestBest || 3;
     // 추가 상자는 즉시 젬으로 전환해 유실 없이 보상
     const extra = G._chestQueue - 1;
     G._chestQueue = 0; G._chestBest = 0;

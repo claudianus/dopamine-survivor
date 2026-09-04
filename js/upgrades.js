@@ -152,6 +152,13 @@ function pickCard(u) {
 /* ---------- 보물 상자 (슬롯머신!) ---------- */
 function openChest(val) {
   G.state = 'chest';
+  // 방어: 혹시 떠 있는 레벨업 오버레이와 겹치지 않게 (상호배제)
+  // 미해결 레벨업이 있었다면 카운트 복원 → 상자 종료 후 다시 열림 (유실 방지)
+  const luEl = document.getElementById('overlay-levelup');
+  if (!luEl.classList.contains('hidden')) {
+    luEl.classList.add('hidden');
+    G.pendingLevelUps++;
+  }
   SFX.play('chest');
   shakeCam(8);
 
