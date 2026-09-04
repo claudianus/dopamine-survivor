@@ -166,7 +166,7 @@ const QUALITY = {
   },
   get maxParticles() { return this.level === 0 ? 320 : (this.level === 1 ? 500 : 700); },
   get maxLights() { return this.level === 0 ? 22 : (this.level === 1 ? 34 : 46); },
-  get maxEnemies() { return this.level === 0 ? 90 : (this.level === 1 ? 130 : 160); },
+  get maxEnemies() { return this.level === 0 ? 120 : (this.level === 1 ? 170 : 220); }, // 몹몰이: 저사양도 120 허용
   get bloomOn() { return true; },
   get streakOn() { return this.level >= 1; },
   get dustOn() { return this.level >= 1; },

@@ -693,7 +693,7 @@ function initRun(seed) {
   MapGen.initFog();
 
   G.player = {
-    x: 0, y: 0, r: 16, hp: 120, maxHp: 120,
+    x: 0, y: 0, r: 16, hp: 160, maxHp: 160, // 몹몰이 물량 늘어난 만큼 시작 체력 완충 (기존 120)
     faceX: 1, faceY: 0, iFrames: 0,
     vel: { x: 0, y: 0 }, thornAcc: 0, ghostT: 0,
     moving: false, squash: 0, walkT: 0,
@@ -751,7 +751,7 @@ function initRun(seed) {
   MUSIC.start(); // 다크 앰비언트 BGM
 }
 
-function xpFor(lvl) { return Math.floor(4 + (lvl - 1) * 4.5 + Math.pow(lvl - 1, 1.65)); }
+function xpFor(lvl) { return Math.floor(7 + (lvl - 1) * 7 + Math.pow(lvl - 1, 1.9)); } // 몹몰이 완만화: 레벨업 간격을 늘려 물량과 경주 (기존 4/4.5/1.65)
 
 /* 심층부 젬 배율: 티어당 +8%, 최대 +80% */
 function depthGemMult() { return 1 + Math.min(G.depth || 0, 10) * 0.08; }

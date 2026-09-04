@@ -56,8 +56,11 @@ function pickEnemyForBiome(b, tierWeights) {
 function spawnEnemy(x, y, typeId, opts = {}) {
   const def = ENEMY_TYPES[typeId];
   const m = G.minute; // 경과 분
-  const hpMul = 1 + m * 0.42 + m * m * 0.16;  // 7분: ~11배 / 20분: ~74배 (티어4+보스가 후반 압박 담당)
-  const dmgMul = 1 + m * 0.16;
+  // 몹몰이 재편 v2.1: 기저 2.2x — 원킬 방지는 유지하되 초반 순삭 방지.
+  // (3.4x 실험에서 39초 게임오버 — 물량 증가와 함께 과교정이었다)
+  const hpMul = (2.2 + m * 0.42 + m * m * 0.16) * (1 + (G.depth || 0) * 0.06);
+  // 접촉 데미지: 첫 2분은 0.5x로 완충 (몰리는 물량에서 벌어지는 학습 시간) — 0.25분에 0.5, 2분에 1.0
+  const dmgMul = clamp(0.5 + m * 0.25, 0.5, 1 + m * 0.16);
   const e = {
     type: typeId, def,
     x, y, vx: 0, vy: 0,
@@ -112,29 +115,33 @@ function spawnBoss(bd) {
   return e;
 }
 
-/* 스폰 관리: 시간에 따라 목표 수치 유지 */
+/* 스폰 관리: 시간에 따라 목표 수치 유지 — 몹몰이 곡선 v2 (2026-09)
+ * 설계: "엄청난 물량을 썰어대는" 서바이버 재미가 본체.
+ * 0분부터 화면에 30마리+, 3분에 100마리, 5분 캡(품질별 120~220).
+ * 성장은 XP 곡선 완만화로 병행 — DPS가 물량을 앞지르지 않게 경주 성립. */
 function updateSpawns(dt) {
   const p = G.player;
   const m = G.minute;
-  // 분당 티어 가중치 변화
+  // 분당 티어 가중치 변화 — 티어2를 30초부터, 티어3을 3분부터 (잡몹 구간 확장)
   const tw = {
-    1: Math.max(2, 10 - m * 0.9),                        // 잡몹은 점차 감소
-    2: m < 1.5 ? 0 : Math.min(2 + m * 1.4, 10),
-    3: m < 4 ? 0 : Math.min(1 + (m - 4) * 0.8, 9),
-    4: m < 8 ? 0 : Math.min(0.8 + (m - 8) * 0.55, 5),   // 8분부터 후반 군단
+    1: Math.max(1, 10 - m * 0.9),                        // 잡몹 폭풍: 초반 주력
+    2: m < 0.5 ? 0 : Math.min(3 + m * 1.6, 10),          // 30초~: 티어2 혼입
+    3: m < 3 ? 0 : Math.min(1.5 + (m - 3) * 0.9, 9),     // 3분~: 정예 혼
+    4: m < 7 ? 0 : Math.min(1 + (m - 7) * 0.6, 5),       // 7분~: 후반 군단
   };
-  const maxE = (typeof QUALITY !== 'undefined') ? QUALITY.maxEnemies : 160;
+  const maxE = (typeof QUALITY !== 'undefined') ? QUALITY.maxEnemies : 220;
   const dep = Math.min(G.depth || 0, 10); // 심층부: 멀수록 밀도·정예율 상승
-  const target = Math.min(14 + m * 13 + Math.min(dep * 2, 20), maxE);
+  // 물량 곡선: 0분 34마리 → 1분 58 → 2분 82 → 3분 106 → 4분 130 → 캡
+  const target = Math.min(34 + m * 24 + Math.min(dep * 2, 20), maxE);
   G.spawnAcc += dt;
-  const interval = 0.22;
+  const interval = 0.12; // 스폰 틱 2배 가속 (0.22 → 0.12): 몰아치는 재보충
   while (G.spawnAcc > interval) {
     G.spawnAcc -= interval;
     if (G.enemies.length >= target) break;
-    const n = 1 + (Math.random() * (1 + m / 4) | 0);
-    for (let i = 0; i < n && G.enemies.length < target + 8; i++) {
+    const n = 1 + (Math.random() * (1.5 + m / 3) | 0);
+    for (let i = 0; i < n && G.enemies.length < target + 12; i++) {
       const a = Math.random() * TAU;
-      const d = Math.max(G.view.w, G.view.h) * 0.62 + rand(60, 320);
+      const d = Math.max(G.view.w, G.view.h) * 0.55 + rand(60, 320); // 스폰 링 안쪽으로 (0.62→0.55): 몰려오는 시간 단축
       const x = p.x + Math.cos(a) * d, y = p.y + Math.sin(a) * d;
       const b = MapGen.biome(Math.floor(x / TILE), Math.floor(y / TILE));
       // 도파민 광산은 엘리트 확률 상승 (도파민!) + 심층부 보너스
@@ -143,11 +150,11 @@ function updateSpawns(dt) {
     }
   }
 
-  // 45초마다 러시 웨이브
+  // 45초마다 러시 웨이브 — 초반에도 28마리씩 몰아친다
   G.rushT -= dt;
   if (G.rushT <= 0) {
     G.rushT = 45;
-    const cnt = 14 + Math.floor(m * 3);
+    const cnt = 28 + Math.floor(m * 5);
     for (let i = 0; i < cnt; i++) {
       const a = (i / cnt) * TAU;
       const d = Math.max(G.view.w, G.view.h) * 0.7 + 80;
@@ -511,11 +518,11 @@ function updateEnemies(dt) {
       e.y += mvy * sp * dt;
     }
 
-    // 플레이어 접촉 피해
+    // 플레이어 접촉 피해 — 무적 프레임: 물량 속에서도 회피 여유 (0.7→0.9s)
     const pd = dist2(e.x, e.y, p.x, p.y);
     if (pd < (e.r + p.r) * (e.r + p.r) && p.iFrames <= 0) {
       hurtPlayer(e.dmg, e.x, e.y);
-      p.iFrames = 0.7;
+      p.iFrames = 0.9;
       // 가시 갑주: 접촉한 적에게 반사 피해
       if (G.passives.thorns > 0 && !e.boss) {
         damageEnemy(e, 10 + G.passives.thorns * 9, true, null);
@@ -656,8 +663,10 @@ function killEnemy(e) {
     }
   }
 
-  // 젬 드롭
-  const gemVal = e.boss ? 50 : e.xp;
+  // 젬 드롭 — 초반 XP 절제 (0.6x → 5분에 1.0x): 물량 2.4배와 상쇄해 성장 속도 유지.
+  // 몹몰이의 재미는 '썰아대는 손맛'이지 초반 무기 만렙이 아니다.
+  const xpScale = Math.min(1, 0.6 + G.minute * 0.08);
+  const gemVal = e.boss ? 50 : Math.max(1, Math.round(e.xp * xpScale));
   let gemCount = Math.round((e.boss ? 6 : 1) * finalDropMult());
   // 광산 도적: 젬 자루 터뜨리며 사망!
   if (e.type === 'thief') {

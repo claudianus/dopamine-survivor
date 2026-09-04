@@ -30,7 +30,7 @@ function initPassives() {
 function recomputeStats() {
   const p = G.player, pv = G.passives;
   p.speed = 255 * (1 + pv.boots * 0.08);
-  p.maxHp = 120 + pv.vitality * 25;
+  p.maxHp = 160 + pv.vitality * 25;
   p.magnetR = 95 * (1 + pv.magnet * 0.35);
   p.critC = 0.05 + pv.crit * 0.05;
   p.critD = 2.0 + pv.crit * 0.15;
@@ -46,10 +46,13 @@ function buildChoices(count = 3) {
   G.banished = G.banished || new Set();
 
   // 무기: 신규 해금 또는 레벨업 (진화 완료 무기는 제외)
+  // 초반 무기 확장 게이트: LV5까지는 보유 무기 강화 우선 — 30초만에 무기 6종 폭탄 방지.
+  // (몹몰이 밸런스: 신규 무기는 조금 늦게, 대신 기존 무기를 착실히 키운다)
+  const unlockWeapons = G.player.level >= 5;
   for (const id in WEAPON_DEFS) {
     if (G.banished.has('w:' + id)) continue;
     const w = G.weapons[id];
-    if (!w && wCount < MAX_WEAPONS) pool.push({ type: 'weapon', id, isNew: true, weight: 10 });
+    if (!w && wCount < MAX_WEAPONS && unlockWeapons) pool.push({ type: 'weapon', id, isNew: true, weight: 10 });
     else if (w && w.lvl < 5 && !w.evolved) pool.push({ type: 'weapon', id, lvl: w.lvl + 1, weight: 12 });
   }
   // 패시브
