@@ -1,0 +1,29 @@
+AUDIO CREDITS
+=============
+All files in this directory are from Kenney game assets (https://kenney.nl),
+released under Creative Commons CC0 1.0 Universal (public domain).
+No attribution required — credited here out of respect. Thank you, Kenney!
+
+Source packs (filenames remapped to game roles):
+- Digital Audio pack (https://kenney.nl/assets/digital-audio)
+    laser2.ogg      -> shoot.ogg
+    zap2.ogg        -> zap.ogg
+    phaserDown2.ogg -> thunder.ogg
+    spaceTrash3.ogg -> boom.ogg
+    spaceTrash1.ogg -> blast.ogg
+    powerUp7.ogg    -> levelup.ogg
+    powerUp12.ogg   -> evolve.ogg
+    threeTone2.ogg  -> chest.ogg
+    threeTone1.ogg  -> victory.ogg
+    phaseJump1.ogg  -> dash.ogg
+- RPG Audio pack (https://kenney.nl/assets/rpg-audio)
+    handleCoins.ogg -> gem.ogg
+    chop.ogg        -> hurt.ogg
+    metalClick.ogg  -> clang.ogg
+- UI Audio pack (https://kenney.nl/assets/ui-audio)
+    mouseclick1.ogg -> click.ogg
+    switch4.ogg     -> blip.ogg
+
+CC0 1.0: https://creativecommons.org/publicdomain/zero/1.0/
+The game synthesizes additional layers via WebAudio; samples are
+progressively enhanced on top (Safari falls back to pure synthesis).

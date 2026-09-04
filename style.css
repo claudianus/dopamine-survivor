@@ -69,11 +69,12 @@ html, body {
   font-variant-numeric: tabular-nums;
 }
 #topstats { position: absolute; right: 12px; top: 4px; display: flex; gap: 12px; }
-#kills, #gemcount {
+#kills, #gemcount, #explore {
   font-size: clamp(12px, 1.7vmin, 15px); font-weight: 700; color: #aebdd0;
   text-shadow: 0 1px 4px #000;
   letter-spacing: 1px;
 }
+#explore { color: #9fd8ff; }
 
 #seedTag {
   position: absolute; top: 56px; left: 10px;
@@ -611,6 +612,19 @@ body.is-touch .howto-mobile { display: block; }
 #questBarFill { height: 100%; width: 0%; background: linear-gradient(90deg, #2a7a94, #4de3ff); transition: width 0.25s; }
 #questProg { font-size: clamp(10px, 1.3vmin, 12px); color: #8fa8bd; font-weight: 700; text-align: left; }
 #questCount { font-size: 9px; color: #7dffa0; font-weight: 800; letter-spacing: 1px; }
+
+/* 황금 목적지 화살표 (화면 가장자리 길잡이) */
+#goldArrow {
+  position: absolute; left: 0; top: 0;
+  transform: translate(-50%, -50%);
+  display: flex; align-items: center; gap: 6px;
+  font-weight: 900; color: var(--gold);
+  text-shadow: 0 0 14px rgba(232,183,74,0.9), 0 1px 3px #000;
+  pointer-events: none;
+  animation: ragePulse 1s infinite;
+}
+#goldDir { display: inline-block; font-size: clamp(20px, 3vmin, 30px); }
+#goldDist { font-size: clamp(11px, 1.6vmin, 14px); letter-spacing: 1px; }
 
 /* 월드 이벤트 태그 */
 #eventTag {

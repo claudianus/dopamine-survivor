@@ -115,7 +115,8 @@ function updateSpawns(dt) {
     4: m < 8 ? 0 : Math.min(0.8 + (m - 8) * 0.55, 5),   // 8분부터 후반 군단
   };
   const maxE = (typeof QUALITY !== 'undefined') ? QUALITY.maxEnemies : 160;
-  const target = Math.min(14 + m * 13, maxE);
+  const dep = Math.min(G.depth || 0, 10); // 심층부: 멀수록 밀도·정예율 상승
+  const target = Math.min(14 + m * 13 + Math.min(dep * 2, 20), maxE);
   G.spawnAcc += dt;
   const interval = 0.22;
   while (G.spawnAcc > interval) {
@@ -127,8 +128,8 @@ function updateSpawns(dt) {
       const d = Math.max(G.view.w, G.view.h) * 0.62 + rand(60, 320);
       const x = p.x + Math.cos(a) * d, y = p.y + Math.sin(a) * d;
       const b = MapGen.biome(Math.floor(x / TILE), Math.floor(y / TILE));
-      // 도파민 광산은 엘리트 확률 상승 (도파민!)
-      const eliteP = 0.012 + m * 0.004 + (b === B_CRYSTAL ? 0.05 : 0) + G.passives.luck * 0.006;
+      // 도파민 광산은 엘리트 확률 상승 (도파민!) + 심층부 보너스
+      const eliteP = 0.012 + m * 0.004 + (b === B_CRYSTAL ? 0.05 : 0) + G.passives.luck * 0.006 + dep * 0.004;
       spawnEnemy(x, y, pickEnemyForBiome(b, tw), { elite: Math.random() < eliteP });
     }
   }
@@ -621,8 +622,8 @@ function killEnemy(e) {
     G.pickups.push({ kind: 'magnet', x: e.x, y: e.y, val: 0, t: 0, vx: 0, vy: 0 });
   }
 
-  // 상자 드롭
-  const chestP = e.boss ? 1 : (e.elite ? 0.22 + luck * 0.02 : 0);
+  // 상자 드롭 (심층부 보너스)
+  const chestP = e.boss ? 1 : (e.elite ? 0.22 + luck * 0.02 + Math.min(G.depth || 0, 10) * 0.01 : 0);
   if (Math.random() < chestP) {
     G.pickups.push({ kind: 'chest', x: e.x, y: e.y - 10, val: e.boss ? 5 : 3, t: 0, vx: 0, vy: 0 });
     showBanner(e.boss ? '💎 보물 상자 등장!' : '💎 상자 드롭!', '#ffd23f');

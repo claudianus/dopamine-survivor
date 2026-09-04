@@ -666,8 +666,10 @@ function initRun(seed) {
   G.ritual = null;
   G.boss = null;
   G.bossSpawned = new Set();
-  G.stats = { kills: 0, gems: 0, bestCombo: 0, quests: 0, regions: 1 };
+  G.stats = { kills: 0, gems: 0, bestCombo: 0, quests: 0, regions: 1, golden: 0 };
   G.combo = 0; G.comboT = 0;
+  G.depth = 0; G.maxDepth = 0;
+  G.golden = null;
   G.spawnAcc = 0;
   G.rushT = 45;
   G.eliteWaveT = 150;
@@ -705,10 +707,14 @@ function initRun(seed) {
   QUESTS.reset(G.seed);
   WORLD_EVENTS.reset(G.seed);
   G.visitedBiomes = new Set([MapGen.biome(0, 0)]);
+  spawnGolden(0); // 첫 황금 목적지
   MUSIC.start(); // 다크 앰비언트 BGM
 }
 
 function xpFor(lvl) { return Math.floor(4 + (lvl - 1) * 4.5 + Math.pow(lvl - 1, 1.65)); }
+
+/* 심층부 젬 배율: 티어당 +8%, 최대 +80% */
+function depthGemMult() { return 1 + Math.min(G.depth || 0, 10) * 0.08; }
 
 /* ---------- 피해 텍스트 / 파티클 / 콤보 ---------- */
 function spawnDmgText(x, y, val, crit, isPlayer) {
@@ -817,12 +823,28 @@ function updatePlayer(dt) {
 
   /* 지형 속도 물리: 지형별 가속/마찰 (빙판 드리프트!) */
   const props = MapGen.groundProps(p.x, p.y);
-  // 지역 발견: 새 바이옴 첫 진입
+  // 지역 발견: 새 바이옴 첫 진입 → 즉시 탐험 보상 (이동의 잔돈)
   if (!G.visitedBiomes.has(props.biome)) {
     G.visitedBiomes.add(props.biome);
     G.stats.regions = G.visitedBiomes.size;
-    showBanner('🗺️ 새 지역 발견: ' + BIOME_INFO[props.biome].name, '#4de3ff');
-    SFX.play('pick');
+    const n = G.visitedBiomes.size, m = G.minute;
+    // 젬 분수 + 게이지 + 회복
+    const cnt = 8 + ((m * 2) | 0);
+    for (let i = 0; i < cnt; i++) {
+      const a = Math.random() * TAU;
+      G.pickups.push({ kind: 'gem', x: p.x, y: p.y, val: 2, t: Math.random() * TAU, vx: Math.cos(a) * rand(150, 320), vy: Math.sin(a) * rand(150, 320) });
+    }
+    G.rage.value = Math.min(G.rage.max, G.rage.value + 25);
+    p.hp = Math.min(p.maxHp, p.hp + p.maxHp * 0.1);
+    SFX.play('chest');
+    POST.triggerFlash(0.06);
+    if (n % 3 === 0) {
+      G.pickups.push({ kind: 'chest', x: p.x + rand(-60, 60), y: p.y + rand(-60, 60), val: 3, t: 0, vx: 0, vy: 0 });
+      showBanner('🗺️ 새 지역 발견: ' + BIOME_INFO[props.biome].name + '! 상자 보너스!', '#ffd23f');
+    } else {
+      showBanner('🗺️ 새 지역 발견: ' + BIOME_INFO[props.biome].name + ' (+보상!)', '#4de3ff');
+    }
+    try { if (G.vibrate) G.vibrate(20); } catch (e) {}
   }
   const rushMul = G.rage.active ? 1.3 : 1;
   let desX = 0, desY = 0;
@@ -923,7 +945,7 @@ function updatePlayer(dt) {
       G.pickups.splice(i, 1);
       switch (pk.kind) {
         case 'gem': {
-          const gemMult = (1 + G.passives.greed * 0.25) * (G.frenzy ? 2 : 1);
+          const gemMult = (1 + G.passives.greed * 0.25) * (G.frenzy ? 2 : 1) * depthGemMult();
           const v2 = Math.round(pk.val * gemMult);
           gainXp(v2);
           G.stats.gems += v2;
@@ -1016,6 +1038,18 @@ function update(dt) {
   G.minute = G.time / 60;
   G.frame = (G.frame || 0) + 1;
   if (typeof QUALITY !== 'undefined') QUALITY.track(dt);
+  // 심층부: 스폰 원점からの 거리 티어 (보상·위험 스케일링의 축)
+  G.depth = Math.floor(Math.hypot(G.player.x, G.player.y) / 800);
+  if (G.depth > (G.maxDepth || 0)) {
+    G.maxDepth = G.depth;
+    const p0 = G.player;
+    showBanner('🌊 심도 ' + G.depth + ' 진입! 드롭 강화', '#4de3ff');
+    SFX.play('chest');
+    G.rage.value = Math.min(G.rage.max, G.rage.value + 20);
+    p0.hp = Math.min(p0.maxHp, p0.hp + p0.maxHp * 0.1);
+    POST.triggerFlash(0.06);
+    try { if (G.vibrate) G.vibrate(25); } catch (e) {}
+  }
 
   updatePlayer(dt);
   updateSpawns(dt);
@@ -1029,6 +1063,7 @@ function update(dt) {
   updateHazards(dt);
   QUESTS.update(dt);
   updatePOIs(dt);
+  updateGolden(dt);
   WORLD_EVENTS.update(dt);
   POST.update(dt);
 
@@ -1091,6 +1126,9 @@ function render(dt = 1 / 60) {
 
   // POI 지면 마커 (월드 탐색의 핵심 단서 — 적/픽업 아래에 배치)
   drawPOI(ctx);
+
+  // 황금 목적지 비컨
+  drawGolden(ctx);
 
   // 픽업 (컬링)
   for (const pk of G.pickups) {
@@ -1483,6 +1521,27 @@ function updateHUD(force) {
     document.getElementById('timer').textContent = String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
     document.getElementById('kills').textContent = '💀 ' + G.stats.kills.toLocaleString();
     document.getElementById('gemcount').textContent = '💎 ' + G.stats.gems.toLocaleString();
+    document.getElementById('explore').textContent = '🗺️ ' + (G.visitedBiomes ? G.visitedBiomes.size : 1) + '/10';
+    document.getElementById('seedTag').textContent = '시드 ' + G.seed.toString(16).toUpperCase() + ' · 🌊 심도 ' + (G.depth || 0);
+
+    // 황금 목적지 화살표 (화면 밖일 때만 가장자리에 표시)
+    const ga = document.getElementById('goldArrow');
+    if (ga) {
+      if (G.golden && G.state === 'playing') {
+        const W = G.view.w, H = G.view.h;
+        const sx = (G.golden.x - G.camera.x) * G.zoom, sy = (G.golden.y - G.camera.y) * G.zoom;
+        if (sx > -40 && sy > -40 && sx < W + 40 && sy < H + 40) ga.classList.add('hidden');
+        else {
+          ga.classList.remove('hidden');
+          const m = 70;
+          ga.style.left = clamp(sx, m, W - m) + 'px';
+          ga.style.top = clamp(sy, m, H - m) + 'px';
+          const ang = Math.atan2(sy - H / 2, sx - W / 2);
+          document.getElementById('goldDir').style.transform = `rotate(${ang}rad)`;
+          document.getElementById('goldDist').textContent = Math.round(Math.hypot(G.golden.x - p.x, G.golden.y - p.y)) + 'm';
+        }
+      } else ga.classList.add('hidden');
+    }
 
     // 콤보
     const cel = document.getElementById('combo');
@@ -1566,6 +1625,7 @@ function endScreen(win) {
     <div><span>최고 콤보</span><b>${G.stats.bestCombo.toLocaleString()}</b></div>
     <div><span>퀘스트 완수</span><b>${(G.stats.quests || 0)}</b></div>
     <div><span>이벤트 존 제압</span><b>${(G.poisCleared ? G.poisCleared.size : 0)}</b></div>
+    <div><span>황금 목적지</span><b>${(G.stats.golden || 0)}</b></div>
     <div><span>발견한 지역</span><b>${(G.visitedBiomes ? G.visitedBiomes.size : 1)} / 10</b></div>
     <div><span>점수</span><b class="gold">${score.toLocaleString()}</b></div>`;
   document.getElementById('overlay-end').classList.remove('hidden');
@@ -2038,6 +2098,90 @@ function drawPOI(ctx) {
     }
     ctx.restore();
   }
+}
+
+/* ============================================================
+ * 황금 목적지 — 상시 1개, 멀수록 잭팟. 무한 맵 탐험의 나침반
+ * ============================================================ */
+function spawnGolden(tier) {
+  const p = G.player;
+  // 통과 가능한 지형에 배치 (최대 12회 재시도)
+  for (let t = 0; t < 12; t++) {
+    const a = Math.random() * TAU;
+    const d = 1600 + tier * 500 + rand(0, 700);
+    const x = p.x + Math.cos(a) * d, y = p.y + Math.sin(a) * d;
+    const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE);
+    const b = MapGen.biome(tx, ty);
+    if (b !== B_WATER && b !== B_LAVA && MapGen.featureFor(b, tx, ty) !== 'deep') {
+      G.golden = { x, y, tier };
+      return;
+    }
+  }
+  const a = Math.random() * TAU, d = 1600 + tier * 500;
+  G.golden = { x: p.x + Math.cos(a) * d, y: p.y + Math.sin(a) * d, tier };
+}
+
+function updateGolden(dt) {
+  const g = G.golden, p = G.player;
+  if (!g) return;
+  if (dist2(p.x, p.y, g.x, g.y) > 280 * 280) return;
+  // 도달! 거리 비례 잭팟
+  const t = g.tier;
+  G.stats.golden = (G.stats.golden || 0) + 1;
+  G.pickups.push({ kind: 'chest', x: g.x, y: g.y - 10, val: Math.min(4 + t, 6), t: 0, vx: 0, vy: 0 });
+  const n = 16 + t * 4;
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * TAU;
+    G.pickups.push({ kind: 'gem', x: g.x, y: g.y, val: choice([2, 3, 3, 5]), t: Math.random() * TAU, vx: Math.cos(a) * rand(150, 380), vy: Math.sin(a) * rand(150, 380) });
+  }
+  G.rage.value = G.rage.max;
+  p.hp = Math.min(p.maxHp, p.hp + p.maxHp * 0.3);
+  showBanner('🌟 황금 목적지 도달! 다음은 더 멀리, 더 크게!', '#ffd23f');
+  SFX.play('victory');
+  SFX.play('chest');
+  POST.triggerFlash(0.12);
+  POST.triggerChroma(0.3);
+  shakeCam(5);
+  try { if (G.vibrate) G.vibrate([30, 40, 60]); } catch (e) {}
+  spawnGolden(t + 1);
+  showBanner('🌟 새로운 황금 목적지! 더 멀리, 더 크게', '#ffd23f');
+}
+
+function drawGolden(ctx) {
+  const g = G.golden;
+  if (!g) return;
+  const [gL, gT, gR, gB] = viewRect(420); // 광기둥 상단 여유
+  if (g.x < gL || g.x > gR || g.y < gT || g.y > gB) return;
+  const t = G.time;
+  const pulse = 1 + Math.sin(t * 3) * 0.12;
+  ctx.save();
+  ctx.translate(g.x, g.y);
+  // 지면 발광
+  ctx.globalCompositeOperation = 'lighter';
+  Glow.draw(ctx, '#ffd23f', 0, 0, 90 * pulse, 0.55);
+  ctx.globalCompositeOperation = 'source-over';
+  // 황금 광기둥
+  const beamH = 340;
+  const grad = ctx.createLinearGradient(0, 0, 0, -beamH);
+  grad.addColorStop(0, 'rgba(255,215,106,0.5)');
+  grad.addColorStop(1, 'rgba(255,215,106,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(-14 * pulse, -beamH, 28 * pulse, beamH);
+  // 회전 링
+  ctx.strokeStyle = 'rgba(255,230,150,0.8)';
+  ctx.lineWidth = 2.4;
+  ctx.setLineDash([16, 10]);
+  ctx.lineDashOffset = -t * 40;
+  ctx.beginPath(); ctx.arc(0, 0, 46 * pulse, 0, TAU); ctx.stroke();
+  ctx.setLineDash([]);
+  // ◆ 마커
+  ctx.fillStyle = '#fff3c4';
+  ctx.save();
+  ctx.translate(0, -66 + Math.sin(t * 2.4) * 8);
+  ctx.rotate(Math.PI / 4);
+  ctx.fillRect(-9, -9, 18, 18);
+  ctx.restore();
+  ctx.restore();
 }
 
 /* ============================================================

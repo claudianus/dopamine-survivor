@@ -538,6 +538,22 @@ const MapGen = {
       mctx.fillStyle = '#4de3ff';
       mctx.beginPath(); mctx.arc(cx, cy, 1.6, 0, TAU); mctx.fill();
     }
+    // 황금 목적지 마커 (맥동하는 금색 다이아, 화면 밖이면 가장자리에 클램프)
+    if (G.golden) {
+      const now2 = performance.now();
+      const mx = (G.golden.x - px) / scale + W / 2, my = (G.golden.y - py) / scale + W / 2;
+      const cx = clamp(mx, 7, W - 7), cy = clamp(my, 7, W - 7);
+      const s = 4.5 + Math.sin(now2 / 220) * 1.5;
+      mctx.save();
+      mctx.translate(cx, cy);
+      mctx.rotate(Math.PI / 4);
+      mctx.fillStyle = '#ffd23f';
+      mctx.fillRect(-s / 2, -s / 2, s, s);
+      mctx.strokeStyle = '#fff';
+      mctx.lineWidth = 1.4;
+      mctx.strokeRect(-s / 2, -s / 2, s, s);
+      mctx.restore();
+    }
     // 플레이어
     mctx.fillStyle = '#fff';
     mctx.beginPath(); mctx.arc(W / 2, W / 2, 3.4, 0, TAU); mctx.fill();
