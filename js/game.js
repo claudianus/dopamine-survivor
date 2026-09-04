@@ -2163,6 +2163,26 @@ function updatePOIs(dt) {
 
   for (const poi of G.pois) {
     const d = dist(p.x, p.y, poi.x, poi.y);
+
+    // 둥지 사망 거리: 플레이어가 둥지를 크게 벗어나면 미발견 상태로 리셋 —
+    // 경비병은 둥지에 잔류하므로(거리 제거 면제) 멀리 있는 동안 필드에 방치하지 않고
+    // 회수했다가 다시 가까워지면 '재발견'으로 경비병 재배치. 소탕 보상은 진짜 전투로만.
+    if (poi.type === 'nest' && !poi.cleared && !poi.ritualActive) {
+      if (d > 2300) {
+        // 경비병 회수
+        if (poi.guards) for (const g of poi.guards) {
+          const gi = G.enemies.indexOf(g);
+          if (gi >= 0) G.enemies.splice(gi, 1);
+        }
+        const idx = G.pois.indexOf(poi);
+        if (idx >= 0) G.pois.splice(idx, 1);
+        // 둥지 상자도 회수 (미획득 상태로 되돌림 — 재발견 시 다시 드랍)
+        const chestIdx = G.pickups.findIndex(pk => pk.kind === 'chest' && dist2(pk.x, pk.y, poi.x, poi.y) < 60 * 60);
+        if (chestIdx >= 0) G.pickups.splice(chestIdx, 1);
+        continue;
+      }
+    }
+
     if (poi.type === 'spring' && d < 110) {
       p.hp = Math.min(p.maxHp, p.hp + 7 * dt);
       G.rage.value = Math.min(G.rage.max, G.rage.value + 16 * dt);

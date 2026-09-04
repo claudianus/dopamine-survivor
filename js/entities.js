@@ -296,8 +296,9 @@ function updateEnemies(dt) {
   for (let i = G.enemies.length - 1; i >= 0; i--) {
     const e = G.enemies[i];
 
-    // 너무 멀면 제거 (리스폰됨)
-    if (dist2(e.x, e.y, p.x, p.y) > 2600 * 2600) { G.enemies.splice(i, 1); continue; }
+    // 너무 멀면 제거 (리스폰됨) — 단, 둥지 경비병은 둥지에 잔류하므로 제외.
+    // (경비병이 제거되면 플레이어가 한 마리도 안 죽였는데 '둥지 소탕 완료' 보상이 터지는 버그가 있었다)
+    if (!e.guard && dist2(e.x, e.y, p.x, p.y) > 2600 * 2600) { G.enemies.splice(i, 1); continue; }
 
   // 스폰 포탈 연출 중엔 느리게, 무례하게 등장하지 않음
   e.spawnT = Math.max(0, e.spawnT - dt);
