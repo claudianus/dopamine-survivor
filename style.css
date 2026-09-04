@@ -639,3 +639,167 @@ body.is-touch .howto-mobile { display: block; }
   #questText { font-size: 10.5px; }
   #eventTag { top: 128px; right: 8px; font-size: 11px; }
 }
+
+/* ============================================================
+   🎰 카지노 도파민 시스템 — 잭팟 게이지 / 빅윈 / 리롤·밴시시 / 저주 / 칩 상점
+   ============================================================ */
+
+/* 도파민 잭팟 게이지 (보스바 아래, 항상 보이는 유혹) */
+#jackpotWrap {
+  position: absolute; top: 92px; left: 50%; transform: translateX(-50%);
+  width: min(300px, 44vw);
+  pointer-events: none;
+}
+#jackpotBar {
+  position: relative; height: 9px;
+  background: rgba(0,0,0,0.72);
+  border: 1px solid rgba(255,210,63,0.45);
+  border-radius: 5px; overflow: hidden;
+}
+#jackpotFill {
+  height: 100%; width: 0%;
+  background: linear-gradient(90deg, #7a4a10, #e8b74a, #ffe9a8, #ffd23f);
+  background-size: 200% 100%;
+  animation: xpshine 1.8s linear infinite;
+  transition: width 0.3s;
+  box-shadow: 0 0 8px rgba(232,183,74,0.5);
+}
+#jackpotText {
+  position: absolute; left: 50%; top: 0; transform: translateX(-50%);
+  line-height: 9px; font-size: 9px; font-weight: 900;
+  color: #fff3c4; text-shadow: 0 0 6px rgba(232,183,74,0.9), 0 1px 2px #000;
+  letter-spacing: 1px; pointer-events: none;
+}
+#jackpotWrap.full #jackpotBar {
+  border-color: #ffd23f;
+  box-shadow: 0 0 18px rgba(255,210,63,0.8);
+  animation: ragePulse 0.45s ease-in-out infinite;
+}
+#jackpotWrap.full #jackpotText { animation: ragePulse 0.45s infinite; }
+@media (max-width: 720px) {
+  #jackpotWrap { width: 46vw; top: calc(74px + env(safe-area-inset-top, 0px)); }
+}
+
+/* BIG WIN / MEGA WIN / EPIC WIN 세레머니 (풀스크린 티어) */
+#bigwin {
+  position: fixed; inset: 0; z-index: 45;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0.35), rgba(0,0,0,0) 65%);
+}
+#bigwin-tier {
+  font-size: clamp(44px, 11vw, 110px); font-weight: 900; letter-spacing: 6px;
+  background: linear-gradient(180deg, #fff3c4 10%, #ffd23f 45%, #e8842a 85%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 4px 26px rgba(255,210,63,0.85)) drop-shadow(0 2px 4px #000);
+  animation: bigwinPop 0.5s cubic-bezier(0.2, 1.6, 0.4, 1) backwards;
+}
+#bigwin-amount {
+  font-size: clamp(16px, 3.4vmin, 30px); font-weight: 900; color: #e8f0fa;
+  text-shadow: 0 0 18px rgba(77,227,255,0.8), 0 2px 4px #000;
+  letter-spacing: 2px; margin-top: 8px;
+  animation: bigwinPop 0.5s 0.18s cubic-bezier(0.2, 1.6, 0.4, 1) backwards;
+}
+#bigwin.tier-mega #bigwin-tier {
+  background: linear-gradient(180deg, #ffd9ec 10%, #ff4d9d 45%, #9b5de5 85%);
+  -webkit-background-clip: text; background-clip: text;
+  filter: drop-shadow(0 4px 30px rgba(255,77,157,0.9)) drop-shadow(0 2px 4px #000);
+}
+#bigwin.tier-epic #bigwin-tier {
+  background: linear-gradient(180deg, #d6fff2 10%, #2ee6a8 40%, #4de3ff 80%);
+  -webkit-background-clip: text; background-clip: text;
+  filter: drop-shadow(0 4px 34px rgba(46,230,168,0.95)) drop-shadow(0 2px 4px #000);
+}
+@keyframes bigwinPop {
+  0% { opacity: 0; transform: scale(0.3) rotate(-6deg); filter: blur(8px); }
+  60% { opacity: 1; transform: scale(1.12) rotate(1deg); filter: blur(0); }
+  100% { opacity: 1; transform: scale(1) rotate(0); }
+}
+
+/* 레벨업 리롤/밴시시 툴바 */
+#lu-tools { display: flex; gap: 8px; justify-content: center; margin-top: 14px; }
+#lu-tools .btn.small { min-width: 120px; }
+#lu-tools .btn.small:disabled { opacity: 0.35; cursor: not-allowed; transform: none; box-shadow: none; }
+.lu-tools-count {
+  margin-top: 8px; font-size: 11px; color: rgba(232,183,74,0.75);
+  letter-spacing: 1px; font-weight: 700;
+}
+.lu-card.banished { opacity: 0.25; filter: grayscale(1) blur(1px); pointer-events: none; transform: scale(0.92); }
+
+/* 상자 스킬스톱 힌트 + 저주 선택 UI */
+.ch-stop-hint { color: rgba(255,210,63,0.8); }
+#ch-slots .ch-slot { cursor: pointer; }  /* 스킬스톱: 릴 탭 가능 */
+.ch-slot.stopped { cursor: default; }
+#ch-curse { display: flex; gap: 8px; justify-content: center; margin-top: 10px; flex-wrap: wrap; }
+#ch-curse .btn.small { min-width: 150px; }
+#ch-curse .btn.danger {
+  border-color: rgba(155,93,229,0.8); background: rgba(155,93,229,0.12);
+  animation: startGlow 1.6s ease-in-out infinite;
+}
+
+/* 사망 리캡 (near-miss 카드) */
+.end-recap {
+  margin: 0 auto 14px; max-width: 400px; text-align: left;
+}
+.end-recap .recap-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; margin-bottom: 4px;
+  background: rgba(232,183,74,0.07);
+  border-left: 3px solid rgba(232,183,74,0.7);
+  border-radius: 0 3px 3px 0;
+  font-size: 12.5px; color: #ffe9b8; letter-spacing: 0.3px;
+}
+.end-recap .recap-item b { color: #fff; }
+.end-recap .recap-none {
+  text-align: center; color: rgba(170,190,212,0.5); font-size: 12px; letter-spacing: 1px;
+}
+
+/* 칩 획득 표시 (엔드 화면) */
+#end-chips {
+  margin: 0 auto 14px; font-size: 15px; font-weight: 900; color: var(--gold);
+  text-shadow: 0 0 14px rgba(232,183,74,0.7);
+  letter-spacing: 1px;
+}
+#end-chips .chip-detail { font-size: 11px; color: rgba(232,183,74,0.6); font-weight: 700; margin-top: 3px; }
+
+/* 칩 상점 */
+.shop-panel { min-width: min(92vw, 560px); }
+.shop-head {
+  font-size: 26px; font-weight: 900; color: var(--gold);
+  text-shadow: 0 0 26px rgba(232,183,74,0.7); letter-spacing: 4px;
+}
+.shop-sub { color: rgba(170,190,212,0.55); font-size: 12px; margin: 8px 0 16px; letter-spacing: 1.5px; }
+#shop-chips {
+  font-size: 17px; font-weight: 900; color: #fff3c4; margin-bottom: 14px;
+  text-shadow: 0 0 12px rgba(232,183,74,0.6); letter-spacing: 1px;
+}
+#shop-items { display: flex; flex-direction: column; gap: 8px; }
+.shop-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 14px; text-align: left;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--line); border-radius: 4px;
+  cursor: pointer; transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+.shop-item:hover { background: rgba(232,183,74,0.08); border-color: var(--gold); transform: translateY(-1px); }
+.shop-item:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.shop-item .si-emoji { font-size: 26px; width: 34px; text-align: center; }
+.shop-item .si-info { flex: 1; }
+.shop-item .si-name { font-size: 13.5px; font-weight: 900; color: #e8f0fa; letter-spacing: 0.5px; }
+.shop-item .si-desc { font-size: 11px; color: rgba(200,214,230,0.65); margin-top: 2px; }
+.shop-item .si-pips { display: flex; gap: 3px; margin-top: 5px; }
+.shop-item .si-pips i { width: 14px; height: 4px; border-radius: 1px; background: rgba(255,255,255,0.12); }
+.shop-item .si-pips i.on { background: var(--gold); box-shadow: 0 0 5px rgba(232,183,74,0.8); }
+.shop-item .si-cost { font-size: 13px; font-weight: 900; color: var(--gold); white-space: nowrap; }
+.shop-item.maxed .si-cost { color: #7dffa0; }
+
+/* 타이틀 메타 로우 (오늘의 시드 / 칩 상점 / 출석) */
+.meta-row { display: flex; gap: 8px; justify-content: center; align-items: center; margin-bottom: 14px; }
+.streak-badge {
+  font-size: 12px; font-weight: 900; color: #7dffa0;
+  background: rgba(125,255,160,0.1);
+  border: 1px solid rgba(125,255,160,0.4);
+  border-radius: 3px; padding: 6px 10px; letter-spacing: 1px;
+  animation: ragePulse 1.4s infinite;
+}

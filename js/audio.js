@@ -284,6 +284,61 @@ const SFX = {
       case 'charge':  this.tone(140, 0.6, 'sawtooth', 0.2, 380, 0, P); break;
       case 'ragehit': this.tone(260, 0.09, 'sawtooth', 0.16, 560, 0, P); break;
       case 'portal':  this.tone(90, 0.4, 'sine', 0.14, 60, 0, P); this.noise(0.35, 0.1, 500, 0, P); break;
+      /* ===== 🎰 카지노 도파민 패밀리 ===== */
+      case 'jackpot': // 잭팟 터짐 — 상승 라이저 + 코인 캐스케이드
+        this.tone(220, 0.7, 'sawtooth', 0.26, 880);
+        this.tone(440, 0.7, 'square', 0.12, 1760, 0, null, 0.05);
+        this.noise(0.6, 0.16, 6000, 0, null, 'highpass');
+        // 코인 샤라라라 (고음 디튠 벨 연타)
+        [1568, 1976, 2093, 2637, 3136, 3520, 4186].forEach((f, i) => this.tone(f, 0.14, 'sine', 0.12, 0, 0.1 + i * 0.045));
+        this.tone(65, 0.9, 'sine', 0.34, -16, 0);
+        break;
+      case 'jackpotready': // 게이지 풀충전 예고
+        this.tone(523, 0.16, 'square', 0.2, 0);
+        this.tone(659, 0.16, 'square', 0.2, 0, 0.13);
+        this.tone(784, 0.16, 'square', 0.2, 0, 0.26);
+        this.tone(1046, 0.34, 'square', 0.22, 0, 0.39);
+        this.tone(2093, 0.3, 'sine', 0.1, 0, 0.39);
+        break;
+      case 'bigwin': // BIG/MEGA/EPIC WIN 팡파레
+        this.playSample('victory', 0.5, 1, null, 0.5);
+        [523, 659, 784, 1046, 1318, 1568].forEach((f, i) => {
+          this.tone(f, 0.3, 'sawtooth', 0.16, 0, i * 0.09);
+          this.tone(f * 0.5, 0.32, 'triangle', 0.1, 0, i * 0.09);
+        });
+        this.noise(0.9, 0.14, 5500, 0, null, 'highpass');
+        this.tone(55, 1.2, 'sine', 0.3, -10, 0.1);
+        break;
+      case 'dice': // 리롤 — 주사위 굴림 틱
+        for (let i = 0; i < 5; i++) this.tone(700 + Math.random() * 900, 0.05, 'square', 0.14, -180, i * 0.055);
+        this.noise(0.3, 0.08, 2400, 0, null, 'bandpass');
+        break;
+      case 'banish': // 밴시시 — 낮은 퍼프 + 소멸
+        this.tone(180, 0.3, 'sawtooth', 0.24, -120);
+        this.tone(90, 0.4, 'sine', 0.2, -50, 0.05);
+        this.noise(0.35, 0.12, 900, 0.02, null);
+        break;
+      case 'curseoffer': // 저주 제안 — 어두운 유혹 (디튠 2음)
+        this.tone(196, 0.5, 'sawtooth', 0.2, -6);
+        this.tone(207, 0.5, 'sawtooth', 0.2, -6, 0.02); // 비트 유니즌
+        this.tone(98, 0.7, 'sine', 0.22, -4, 0.1);
+        break;
+      case 'cursesuccess': // 저주 성공 — 악랄한 승리
+        this.tone(110, 0.6, 'sawtooth', 0.3, 220);
+        this.tone(233, 0.6, 'square', 0.14, 466, 0.05);
+        [932, 1109, 1397, 1865].forEach((f, i) => this.tone(f, 0.18, 'sine', 0.12, 0, 0.12 + i * 0.06));
+        this.noise(0.5, 0.16, 4000, 0, null, 'highpass');
+        break;
+      case 'cursefail': // 저주 폭발 — 찢어지는 패배
+        this.tone(300, 0.5, 'sawtooth', 0.3, -260);
+        this.tone(150, 0.55, 'square', 0.2, -130, 0.03);
+        this.noise(0.55, 0.3, 800);
+        this.tone(55, 0.8, 'sine', 0.34, -18, 0.05);
+        break;
+      case 'heartbeat': // 💓 러시 게이지 90%+ 심장박
+        this.tone(55, 0.09, 'sine', 0.4, -8);
+        this.tone(55, 0.07, 'sine', 0.28, -8, 0.16);
+        break;
     }
   },
 };

@@ -268,3 +268,69 @@ function sparkBurst(x, y, color, n = 6, speed = 340) {
     });
   }
 }
+
+/* ============================================================
+ * 🎰 도파민 칩 메타 진행 — 런 간 영구 데이터 (칩·버프·출석·오늘의 시드)
+ * ============================================================ */
+const CHIP_BUFFS = {
+  startWeapon: { name: '선물 무기', emoji: '🎁', desc: '런 시작 시 무기 1종 추가 지급', max: 3, cost: lv => 20 + lv * 15 },
+  startHp:     { name: '단련된 체력', emoji: '❤️', desc: '시작 최대 체력 +20', max: 5, cost: lv => 10 + lv * 8 },
+  startGems:   { name: '선술투자', emoji: '💎', desc: '시작 시 젬 10개 지급 (레벨 3 즉시 도약)', max: 3, cost: lv => 12 + lv * 10 },
+  jackpotBoost:{ name: '고정 브로커', emoji: '🎰', desc: '잭팟 충전 속도 +15%', max: 3, cost: lv => 25 + lv * 20 },
+  rerollPlus:  { name: '두번째 기회', emoji: '🎲', desc: '런당 리롤 횟수 +1', max: 2, cost: lv => 30 + lv * 25 },
+};
+
+const META = {
+  _key: 'ds_meta_v1',
+  data: null,
+
+  load() {
+    if (this.data) return this.data;
+    let d = null;
+    try { d = JSON.parse(lsGet(this._key) || 'null'); } catch (e) { d = null; }
+    // 스키마 기본값 병합 (구버전 저장 호환)
+    this.data = Object.assign({
+      chips: 0, chipsEarned: 0,
+      jackpot: 0,           // 0~100 (런 간 유지)
+      streak: 0, lastDay: '',
+      buffs: {},            // { startWeapon: 0, ... }
+      dailyBest: null,      // { day: 'YYYY-MM-DD', score: n }
+      runs: 0,
+    }, d || {});
+    for (const k in CHIP_BUFFS) if (!(k in this.data.buffs)) this.data.buffs[k] = 0;
+    return this.data;
+  },
+
+  save() {
+    if (!this.data) return;
+    lsSet(this._key, JSON.stringify(this.data));
+  },
+
+  buff(id) { const d = this.load(); return (d.buffs && d.buffs[id]) || 0; },
+
+  /* 오늘의 시드: 날짜를 숫자로 해시 — 전 플레이어가 같은 월드 */
+  dailySeed() {
+    const now = new Date();
+    const day = now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
+    return ((day * 2654435761) >>> 0) || 1;
+  },
+  todayKey() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  },
+
+  /* 연속 출석 체크: 하루 1회만 카운트. 오늘이면 true(이미 처리됨) */
+  touchStreak() {
+    const d = this.load();
+    const today = this.todayKey();
+    if (d.lastDay === today) return true;
+    // 어제 접속했으면 streak+1, 아니면 리셋
+    const y = new Date(Date.now() - 86400000);
+    const yKey = `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, '0')}-${String(y.getDate()).padStart(2, '0')}`;
+    d.streak = (d.lastDay === yKey) ? d.streak + 1 : 1;
+    d.lastDay = today;
+    this.save();
+    return false; // 오늘 첫 접속
+  },
+};
+

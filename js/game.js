@@ -681,6 +681,10 @@ function initRun(seed) {
   G.userZoom = 1;
   G.zoom = G.baseZoom || 1;
   G.lavaTick = 0;
+  G.pityChest = 0;          // 🎰 pity 카운터 초기화
+  G.rerolls = undefined; G.banishes = undefined; // refreshLuTools가 버프 반영해 채움
+  G.banished = new Set();   // 🚫 밴시시 (이번 런)
+  G.finalMinuteStarted = false; // ⏰ 최후의 60초
   document.body.classList.remove('rush'); // 이전 러시 상태 잔존 방지
   MapGen.initFog();
 
@@ -696,6 +700,32 @@ function initRun(seed) {
   initPassives();
   recomputeStats();
   initWeapons();
+
+  // 🪙 칩 상점 영구 버프 적용 — 런 시작 전 투자가 즉시 체감된다
+  const meta = META.load();
+  const startHpB = META.buff('startHp');
+  if (startHpB > 0) {
+    G.player.maxHp += startHpB * 20;
+    G.player.hp = G.player.maxHp;
+  }
+  const startW = META.buff('startWeapon');
+  if (startW > 0) {
+    const owned = Object.keys(G.weapons);
+    const pool = Object.keys(WEAPON_DEFS).filter(id => !owned.includes(id));
+    for (let i = 0; i < startW && pool.length; i++) {
+      const pick = choice(pool);
+      pool.splice(pool.indexOf(pick), 1);
+      G.weapons[pick] = { lvl: 1, cd: 0 };
+    }
+  }
+  const startG = META.buff('startGems');
+  if (startG > 0) {
+    for (let i = 0; i < startG * 6; i++) {
+      const a = Math.random() * TAU;
+      G.pickups.push({ kind: 'gem', x: 0, y: 0, val: 2, t: Math.random() * TAU, vx: Math.cos(a) * rand(120, 260), vy: Math.sin(a) * rand(120, 260) });
+    }
+  }
+
   G.player.cape = Array.from({ length: 6 }, () => ({ x: 0, y: 0 }));
 
   G.camera = { x: 0, y: 0, shake: 0 };
@@ -721,6 +751,33 @@ function xpFor(lvl) { return Math.floor(4 + (lvl - 1) * 4.5 + Math.pow(lvl - 1, 
 
 /* 심층부 젬 배율: 티어당 +8%, 최대 +80% */
 function depthGemMult() { return 1 + Math.min(G.depth || 0, 10) * 0.08; }
+
+/* ============================================================
+ * 🎰 도파민 잭팟 시스템 — 런 간 영구 게이지. 100% → 다음 상자 MEGA CHEST
+ * ============================================================ */
+function addJackpot(gain) {
+  const d = META.load();
+  if (d.jackpot >= 100) return; // 이미 풀 — 소진(메가 체스트 오픈)까지 추가 없음
+  const before = d.jackpot;
+  d.jackpot = Math.min(100, d.jackpot + gain);
+  META.save();
+  // 100% 도달 순간: 팡파레 (state playing에서만 — 오버레이 중엔 HUD 업데이트로 자연 노출)
+  if (d.jackpot >= 100 && before < 100) {
+    SFX.play('jackpotready');
+    showBanner('🎰 잭팟 준비 완료! 다음 상자가 MEGA CHEST!', '#ffd23f');
+    try { if (navigator.vibrate) navigator.vibrate([40, 30, 80]); } catch (e) {}
+  }
+}
+
+function consumeJackpot() {
+  const d = META.load();
+  if (d.jackpot < 100) return false;
+  d.jackpot = 0;
+  META.save();
+  return true;
+}
+
+/* 🎰 빅 윈 사운드/티어는 upgrades.showBigWin이 담당 — 여기는 HUD 갱신만 */
 
 /* ---------- 피해 텍스트 / 파티클 / 콤보 ---------- */
 function spawnDmgText(x, y, val, crit, isPlayer) {
@@ -984,7 +1041,9 @@ function updatePlayer(dt) {
     // 추가 상자는 즉시 젬으로 전환해 유실 없이 보상
     const extra = G._chestQueue - 1;
     G._chestQueue = 0; G._chestBest = 0;
-    openChest(best);
+    // 🎰 잭팟 풀충전이면 이 상자가 MEGA CHEST로 승격 (게이지 소진)
+    const mega = consumeJackpot();
+    openChest(best, { mega });
     if (extra > 0) {
       for (let k = 0; k < extra * 6; k++) {
         const a = Math.random() * TAU;
@@ -1077,6 +1136,7 @@ function update(dt) {
   updateGolden(simDt);
   WORLD_EVENTS.update(simDt);
   POST.update(simDt);
+  updateFinalMinute(simDt);
 
   // 콤보 감소
   if (G.comboT > 0) {
@@ -1103,10 +1163,41 @@ function update(dt) {
 
   G.hurtVin = Math.max(0, G.hurtVin - dt * 2.2);
 
-  // 음악 긴장도: 보스 1 / 러시 2
-  if (MUSIC.playing) MUSIC.setIntensity(G.rage.active ? 2 : (G.boss ? 1 : 0));
+  // 음악 긴장도: 보스 1 / 러시 2 / 최후의 60초 2
+  if (MUSIC.playing) MUSIC.setIntensity(G.rage.active || G.finalMinute ? 2 : (G.boss ? 1 : 0));
 
   updateHUD(false);
+}
+
+/* ⏰ 최후의 60초 — 19분부터 20분 보스 직전까지: 시간 압축 피날레
+ * (드랍 3배 + 유성우 + 음악 클라이맥스 — "마지막 승부"의 아드레날린) */
+function updateFinalMinute(dt) {
+  const T = G.time;
+  if (T < 1140 || T >= 1200) { G.finalMinute = false; return; } // 19:00~20:00
+  if (!G.finalMinuteStarted) {
+    G.finalMinuteStarted = true;
+    G.finalMinute = true;
+    showBanner('⏰ 최후의 60초! 모든 드랍 3배 — 마지막 잔불을 태워라!', '#ff4d9d');
+    SFX.play('boss');
+    SFX.play('rush');
+    POST.triggerChroma(0.4);
+    POST.triggerFlash(0.12);
+    shakeCam(8);
+    MUSIC.setIntensity(2);
+    try { if (navigator.vibrate) navigator.vibrate([40, 30, 40, 30, 80]); } catch (e) {}
+  }
+  // 유성우 쏟아지기 (월드 이벤트와 별개 — 피날레 전용)
+  G._meteorT = (G._meteorT || 0) - dt;
+  if (G._meteorT <= 0) {
+    G._meteorT = 0.4;
+    const p2 = G.player;
+    const a = Math.random() * TAU, d2 = rand(60, 500);
+    G.projectiles.push({
+      kind: 'meteor', x: p2.x + Math.cos(a) * d2, y: p2.y + Math.sin(a) * d2,
+      tx: p2.x + Math.cos(a) * d2, ty: p2.y + Math.sin(a) * d2,
+      t: 0, dur: 0.85, r: 95, dmg: 60, life: 0.9, color: '#ff8a3d',
+    });
+  }
 }
 
 /* ---------- 렌더 ---------- */
@@ -1542,6 +1633,27 @@ function updateHUD(force) {
   else if (G.rage.value >= G.rage.max) rbar.className = 'ready';
   else rbar.className = '';
 
+  // 🎰 도파민 잭팟 게이지 (영구 — 런 간 유지)
+  const jw = document.getElementById('jackpotWrap');
+  if (jw) {
+    const d = META.load();
+    const jf = document.getElementById('jackpotFill');
+    const jt = document.getElementById('jackpotText');
+    const full = d.jackpot >= 100;
+    jf.style.width = clamp(d.jackpot, 0, 100) + '%';
+    jt.textContent = full ? '🎰 MEGA READY!' : '🎰 ' + Math.floor(d.jackpot) + '%';
+    jw.classList.toggle('full', full);
+  }
+
+  // 💓 러시 게이지 90%+ 심장박 (릴이 멈추기 직전의 긴장)
+  if (!G.rage.active && G.rage.value >= G.rage.max * 0.9) {
+    G._heartbeatT = (G._heartbeatT || 0) - 1 / 60;
+    if (G._heartbeatT <= 0) {
+      G._heartbeatT = 0.8 - (G.rage.value / G.rage.max - 0.9) * 3; // 90→100%: 0.8→1.1초 주기 가속
+      SFX.play('heartbeat');
+    }
+  }
+
   hudAcc += 1;
   if (force || hudAcc > 8) {
     hudAcc = 0;
@@ -1657,7 +1769,66 @@ function endScreen(win) {
     <div><span>황금 목적지</span><b>${(G.stats.golden || 0)}</b></div>
     <div><span>발견한 지역</span><b>${(G.visitedBiomes ? G.visitedBiomes.size : 1)} / 10</b></div>
     <div><span>점수</span><b class="gold">${score.toLocaleString()}</b></div>`;
+
+  // 🎰 near-miss 사망 리캡 — "아깝다"가 다음 판을 부른다
+  document.getElementById('end-recap').innerHTML = buildDeathRecap(win);
+
+  // 🪙 도파민 칩 결제 — 점수 기반 + 승리/첫판 보너스
+  const chipsEarned = settleChips(score, win);
+
   document.getElementById('overlay-end').classList.remove('hidden');
+}
+
+/* 🎰 near-miss 리캡: 사망 컨텍스트 중 가장 아까운 것 1~2개 */
+function buildDeathRecap(win) {
+  if (win) return '<div class="recap-item">🏆 <b>완주!</b> 최종 보스까지 정복했다 — 다음은 더 빠른 클리어다</div>';
+  const items = [];
+  const p = G.player;
+  // 보스 체력 근접
+  if (G.boss && G.enemies.includes(G.boss)) {
+    const pct = Math.ceil(G.boss.hp / G.boss.maxHp * 100);
+    if (pct <= 30) items.push(`👑 <b>${G.boss.bossDef.name}</b> 체력 <b>${pct}%</b> 남기고 쓰러졌다...!`);
+  }
+  // 진화 근접: 만렙 무기 + 진화 안됨
+  const maxed = Object.keys(G.weapons).filter(id => G.weapons[id].lvl >= 5 && !G.weapons[id].evolved);
+  if (maxed.length) {
+    const nm = WEAPON_DEFS[maxed[0]].name, evo = EVOLUTIONS[maxed[0]].name;
+    items.push(`🌟 <b>${nm}</b> 진화 재료는 모였다 — 상자 하나만 더! (<b>${evo}</b>)`);
+  }
+  // 진화 직전 레벨: 무기 Lv4
+  const near = Object.keys(G.weapons).filter(id => G.weapons[id].lvl === 4);
+  if (near.length) items.push(`⚔️ <b>${WEAPON_DEFS[near[0]].name}</b> 만렙까지 <b>레벨업 1개</b> 남음`);
+  // 잭팟 근접
+  const jp = META.load().jackpot;
+  if (jp >= 60 && jp < 100) items.push(`🎰 잭팟 게이지 <b>${Math.floor(jp)}%</b> — 다음 판 상자가 메가 체스트 근처`);
+  // 콤보 근접
+  if (G.stats.bestCombo > 0 && G.stats.bestCombo % 25 >= 18) items.push(`🔥 콤보 <b>${G.stats.bestCombo}</b> — 다음 마일스톤(${Math.ceil(G.stats.bestCombo / 25) * 25})까지 얼마 안 남았다`);
+  // 생존 시간 근접
+  if (!items.length && G.minute >= 4.5 && G.minute < 5) items.push('⏱️ <b>5분 보스</b>까지 30초를 못 버텼다!');
+  else if (!items.length && G.minute >= 9.5 && G.minute < 10) items.push('⏱️ <b>10분 보스</b>까지 얼마 안 남았다!');
+  if (!items.length) return `<div class="recap-item">⏱️ <b>${Math.floor(G.minute)}분 ${Math.floor(G.time % 60)}초</b> 생존 — 다음 목표: ${Math.floor(G.minute) + 1}분</div>`;
+  return items.slice(0, 3).map(t => `<div class="recap-item">${t}</div>`).join('');
+}
+
+/* 🪙 칩 결제: 런 성과 → 영구 화폐 */
+function settleChips(score, win) {
+  const d = META.load();
+  const base = Math.max(3, Math.floor(score / 350));
+  const winBonus = win ? 25 : 0;
+  const streakBonus = Math.min(10, d.streak || 0);
+  const total = base + winBonus + streakBonus;
+  d.chips += total;
+  d.chipsEarned += total;
+  d.runs++;
+  META.save();
+  const el = document.getElementById('end-chips');
+  if (el) {
+    const parts = [`점수 +${base}`];
+    if (winBonus) parts.push(`승리 +${winBonus}`);
+    if (streakBonus) parts.push(`연속출석 +${streakBonus}`);
+    el.innerHTML = `🪙 +${total} 칩 획득! <span style="color:#aebdd0; font-weight:700;">(보유 ${d.chips})</span><div class="chip-detail">${parts.join(' · ')} — 상점에서 영구 버프 구매</div>`;
+  }
+  return total;
 }
 
 function gameOver() { endScreen(false); }
@@ -2348,6 +2519,22 @@ function bindUI() {
   document.getElementById('btn-random-seed').onclick = () => {
     document.getElementById('seedInput').value = String((Math.random() * 0xFFFFFFFF) >>> 0);
   };
+  // 📅 오늘의 시드 — 모든 플레이어가 같은 날짜 월드에서 경쟁
+  document.getElementById('btn-daily-seed').onclick = () => {
+    document.getElementById('seedInput').value = String(META.dailySeed());
+    SFX.play('pick');
+  };
+  // 🪙 칩 상점
+  document.getElementById('btn-shop').onclick = () => { openShop(); };
+  document.getElementById('shop-close').onclick = () => {
+    document.getElementById('overlay-shop').classList.add('hidden');
+    if (G.state === 'shop') G.state = 'title';
+  };
+  // 🎲 리롤 / 🚫 밴시시 (레벨업 오버레이 툴)
+  const rBtn = document.getElementById('lu-reroll');
+  const bBtn = document.getElementById('lu-banish');
+  if (rBtn) rBtn.onclick = () => luReroll();
+  if (bBtn) bBtn.onclick = () => luBanish();
   document.getElementById('btn-retry').onclick = () => {
     document.getElementById('overlay-end').classList.add('hidden');
     initRun((Math.random() * 0xFFFFFFFF) >>> 0);
@@ -2417,6 +2604,71 @@ function bindUI() {
     const q = new URLSearchParams(location.search).get('seed');
     if (q) document.getElementById('seedInput').value = q.slice(0, 20);
   } catch (e) {}
+
+  // 📅 스트릭 체크: 오늘 첫 접속이면 연속 출석 배지 갱신 (하루 1회)
+  META.load();
+  META.touchStreak();
+  refreshStreakBadge();
+}
+
+/* 📅 연속 출석 배지 — 오늘의 첫 방문을 축하한다 */
+function refreshStreakBadge() {
+  const el = document.getElementById('streakBadge');
+  if (!el) return;
+  const d = META.load();
+  if (d.streak >= 2) {
+    el.classList.remove('hidden');
+    el.textContent = `🔥 ${d.streak}일 연속 출석!`;
+  } else el.classList.add('hidden');
+}
+
+/* ============================================================
+ * 🪙 도파민 칩 상점 — 영구 버프 구매 (런 시작 전 메타 투자)
+ * ============================================================ */
+function openShop() {
+  const d = META.load();
+  G.state = 'shop';
+  renderShop();
+  document.getElementById('overlay-shop').classList.remove('hidden');
+  SFX.play('chest');
+}
+
+function renderShop() {
+  const d = META.load();
+  document.getElementById('shop-chips').textContent = `🪙 보유 칩: ${d.chips.toLocaleString()}`;
+  const box = document.getElementById('shop-items');
+  box.innerHTML = '';
+  for (const id in CHIP_BUFFS) {
+    const def = CHIP_BUFFS[id];
+    const lv = d.buffs[id] || 0;
+    const maxed = lv >= def.max;
+    const cost = def.cost(lv);
+    const affordable = d.chips >= cost && !maxed;
+    const el = document.createElement('button');
+    el.className = 'shop-item' + (maxed ? ' maxed' : '');
+    el.disabled = !affordable;
+    let pips = '';
+    for (let i = 0; i < def.max; i++) pips += `<i class="${i < lv ? 'on' : ''}"></i>`;
+    el.innerHTML = `
+      <div class="si-emoji">${def.emoji}</div>
+      <div class="si-info">
+        <div class="si-name">${def.name}</div>
+        <div class="si-desc">${def.desc} · Lv.${lv}/${def.max}</div>
+        <div class="si-pips">${pips}</div>
+      </div>
+      <div class="si-cost">${maxed ? 'MAX ✓' : '🪙 ' + cost}</div>`;
+    el.onclick = () => {
+      if (maxed || d.chips < cost) return;
+      d.chips -= cost;
+      d.buffs[id] = lv + 1;
+      META.save();
+      SFX.play('levelup');
+      POST.triggerFlash(0.08);
+      renderShop();
+      // 구매 즉시 배지/기록 갱신
+    };
+    box.appendChild(el);
+  }
 }
 
 /* ---------- 부팅 ---------- */

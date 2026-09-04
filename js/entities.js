@@ -80,6 +80,13 @@ function spawnEnemy(x, y, typeId, opts = {}) {
     if (abil === 'swift') e.spd *= 1.45;
     if (abil === 'splitter') e.splitOnDeath = true;
   }
+  // ✨ 골든 몹 (0.3%): 예고 없이 터지는 순수 변동 보상 — 잡으면 잭팟 젬 분수
+  if (!opts.elite && Math.random() < 0.003) {
+    e.golden = true;
+    e.hp *= 2.2; e.maxHp = e.hp;
+    e.spd *= 0.8;
+    e.xp *= 10;
+  }
   e.spawnT = 0.5; // 스폰 포탈 연출
   G.enemies.push(e);
   return e;
@@ -544,6 +551,9 @@ function damageEnemy(e, dmg, canCrit = true, knockAng = null) {
   if (e.hp <= 0) killEnemy(e);
 }
 
+/* ⏰ 최후의 60초 드랍 배율 (19~20분) */
+function finalDropMult() { return (G.finalMinute && G.time < 1200) ? 3 : 1; }
+
 function killEnemy(e) {
   const idx = G.enemies.indexOf(e);
   if (idx < 0) return;
@@ -552,6 +562,13 @@ function killEnemy(e) {
   // 도파민 러시 게이지 충전
   if (G.rage) {
     G.rage.value = Math.min(G.rage.max, G.rage.value + (e.boss ? 35 : e.elite ? 10 : 1.7));
+  }
+
+  // 🎰 도파민 잭팟 충전 (런 간 영구 — 상자를 열 때마다 조금씩, 엘리트/보스는 크게)
+  if (typeof META !== 'undefined' && !e.golden) {
+    const boost = 1 + META.buff('jackpotBoost') * 0.15;
+    const gain = (e.boss ? 4.5 : e.elite ? 1.6 : 0.09) * boost;
+    addJackpot(gain);
   }
 
   // 엘리트 분열 능력 사망
@@ -575,6 +592,37 @@ function killEnemy(e) {
   addCombo();
   SFX.play('kill', e.x);
   if (e.elite) G.hitStop = Math.max(G.hitStop, 0.07); // 엘리트 킬 펀치
+
+  // 🎰 킬 마일스톤 세레머니 (BIG/MEGA/EPIC WIN — 세션당 1회씩)
+  if (G.stats.kills === 100 || G.stats.kills === 500 || G.stats.kills === 1000 || G.stats.kills === 2500 || G.stats.kills === 5000) {
+    const k = G.stats.kills;
+    if (k === 100) showBigWin('BIG WIN!', `💀 ${k.toLocaleString()} KILL`, '');
+    else if (k === 500) showBigWin('MEGA WIN!', `💀 ${k.toLocaleString()} KILL`, 'tier-mega');
+    else if (k === 1000) showBigWin('EPIC WIN!', `💀 ${k.toLocaleString()} KILL`, 'tier-epic');
+    else if (k >= 2500) showBigWin('LEGENDARY!', `💀 ${k.toLocaleString()} KILL`, 'tier-epic');
+    addJackpot(5); // 마일스톤 보너스 충전
+    shakeCam(7);
+    POST.triggerFlash(0.12);
+    POST.triggerChroma(0.3);
+    SFX.play(k >= 1000 ? 'bigwin' : 'jackpot');
+  }
+
+  // ✨ 골든 몹 사망 — 잭팟 젬 분수 + 하트 확정
+  if (e.golden) {
+    showBigWin('GOLDEN KILL!', '✨ 황금 몹 젬 분수!', 'tier-mega');
+    SFX.play('jackpot');
+    shakeCam(8);
+    POST.triggerFlash(0.15);
+    POST.triggerChroma(0.4);
+    const n = randi(26, 34);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * TAU;
+      G.pickups.push({ kind: 'gem', x: e.x, y: e.y, val: choice([3, 5, 5, 10]), t: Math.random() * TAU, vx: Math.cos(a) * rand(160, 420), vy: Math.sin(a) * rand(160, 420) });
+    }
+    G.pickups.push({ kind: 'heart', x: e.x + 24, y: e.y, val: 30, t: 0, vx: 0, vy: 0 });
+    shardBurst(e.x, e.y, '#ffd23f', 30, 420, 8);
+    G.explosions.push({ x: e.x, y: e.y, r: 150, life: 0.5, maxLife: 0.5, color: '#ffd23f', thin: true });
+  }
 
   // 시네마틱 사망: 파편 파열 + 영혼 잔상 + 충격파
   shardBurst(e.x, e.y, darken(e.color, 0.75), e.boss ? 42 : (e.elite ? 22 : 9), e.boss ? 460 : 300, e.boss ? 9 : 6);
@@ -608,7 +656,7 @@ function killEnemy(e) {
 
   // 젬 드롭
   const gemVal = e.boss ? 50 : e.xp;
-  let gemCount = e.boss ? 6 : 1;
+  let gemCount = Math.round((e.boss ? 6 : 1) * finalDropMult());
   // 광산 도적: 젬 자루 터뜨리며 사망!
   if (e.type === 'thief') {
     gemCount = randi(10, 16);
@@ -636,6 +684,16 @@ function killEnemy(e) {
   if (Math.random() < chestP) {
     G.pickups.push({ kind: 'chest', x: e.x, y: e.y - 10, val: e.boss ? 5 : 3, t: 0, vx: 0, vy: 0 });
     showBanner(e.boss ? '💎 보물 상자 등장!' : '💎 상자 드롭!', '#ffd23f');
+  } else if (e.elite) {
+    // 🎰 pity 시스템: 엘리트가 상자를 안 떨꾼 횟수 카운트 → 3연속 없으면 확정 (보상 바닥)
+    G.pityChest = (G.pityChest || 0) + 1;
+    if (G.pityChest >= 3) {
+      G.pityChest = 0;
+      G.pickups.push({ kind: 'chest', x: e.x, y: e.y - 10, val: 3, t: 0, vx: 0, vy: 0 });
+      showBanner('🎁 보상 포인트 적립! 상자 확정 드롭', '#ffd23f');
+    }
+  } else if (chestP > 0) {
+    G.pityChest = 0; // 드랍 성공 시 리셋
   }
 
   // 젬 수 상한 병합 (kind 불변: 젬은 젬끼리만 합친다 — 하트/상자 오염 방지)
@@ -715,6 +773,13 @@ function drawEnemyGlow(ctx, e) {
     const t = 1 - e.spawnT / 0.5;
     Glow.draw(ctx, e.color, e.x, e.y + e.r * 0.5, e.r * 1.5 * (1 - t * 0.4), 0.35 * (1 - t));
   }
+  // ✨ 골든 몹: 시선을 강제로 붙잡는 황금 광휘
+  if (e.golden) {
+    const pulse = 0.5 + Math.sin(e.wobble * 2) * 0.18;
+    Glow.draw(ctx, '#ffd23f', e.x, e.y, e.r * 3.4, pulse);
+    Glow.draw(ctx, '#fff3c4', e.x, e.y - e.r * 0.4, e.r * 1.6, pulse * 0.7);
+    return;
+  }
   if (e.elite || e.boss) {
     Glow.draw(ctx, e.boss ? '#ff2d4e' : '#ffaa2d', e.x, e.y, e.r * 2.1, 0.4 + Math.sin(e.wobble * 1.4) * 0.12);
   } else {
@@ -754,6 +819,24 @@ function drawEnemy(ctx, e) {
     ctx.strokeStyle = e.boss ? 'rgba(255,45,78,0.75)' : 'rgba(255,170,45,0.8)';
     ctx.lineWidth = 2.4;
     ctx.beginPath(); ctx.arc(0, 0, e.r + 6 + Math.sin(e.wobble * 1.4) * 2, 0, TAU); ctx.stroke();
+  }
+
+  // ✨ 골든 몹: 황금 궤도 스파클 + 별표식
+  if (e.golden) {
+    ctx.strokeStyle = `rgba(255,210,63,${0.75 + Math.sin(e.wobble * 2.6) * 0.25})`;
+    ctx.lineWidth = 2.6;
+    ctx.setLineDash([6, 7]);
+    ctx.lineDashOffset = -e.wobble * 30;
+    ctx.beginPath(); ctx.arc(0, 0, e.r + 9 + Math.sin(e.wobble * 1.4) * 3, 0, TAU); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalCompositeOperation = 'lighter';
+    Glow.draw(ctx, '#ffd23f', 0, -e.r - 14 + Math.sin(e.wobble) * 3, 10, 0.6);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#ffd23f';
+    ctx.font = '900 13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('★', 0, -e.r - 9 + Math.sin(e.wobble) * 3);
+    ctx.textAlign = '';
   }
 
   ctx.scale(1 / squash, squash);

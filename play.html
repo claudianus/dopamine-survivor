@@ -10,7 +10,7 @@
 <title>도파민 서바이버 - 프로시듀럴 맵 서바이벌</title>
 <meta name="description" content="무한 프로시듀럴 맵에서 벌어지는 도파민 폭발 서바이벌! 레벨업, 무기 수집, 보물 상자, 보스전!">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>💎</text></svg>">
-<link rel="stylesheet" href="style.css?v=120">
+<link rel="stylesheet" href="style.css?v=121">
 </head>
 <body>
 
@@ -66,6 +66,12 @@
     <div id="bosstrack"><div id="bossfill"></div></div>
   </div>
 
+  <!-- 🎰 도파민 잭팟 게이지 (런 간 영구 축적 — 풀 충전 시 다음 상자가 MEGA CHEST) -->
+  <div id="jackpotWrap" title="도파민 잭팟 — 가득 차면 다음 상자가 MEGA CHEST!">
+    <div id="jackpotBar"><div id="jackpotFill"></div></div>
+    <span id="jackpotText">🎰</span>
+  </div>
+
   <canvas id="minimap"></canvas>
 
   <div id="bottombar">
@@ -107,6 +113,12 @@
     <div class="seed-row">
       <input id="seedInput" placeholder="시드 (비우면 랜덤)" maxlength="20" autocomplete="off" inputmode="text">
       <button id="btn-random-seed" class="btn small" aria-label="랜덤 시드">🎲</button>
+      <button id="btn-daily-seed" class="btn small" title="오늘의 시드 — 모두가 같은 월드에서 경쟁!">📅</button>
+    </div>
+
+    <div class="meta-row">
+      <span id="streakBadge" class="streak-badge hidden"></span>
+      <button id="btn-shop" class="btn small">🪙 칩 상점</button>
     </div>
 
     <div class="quality-row">
@@ -137,6 +149,11 @@
     <div class="lu-head">⚡ 레벨 업! ⚡</div>
     <div class="lu-sub">강화를 선택하세요 (1~3 키 또는 클릭)</div>
     <div id="lu-cards"></div>
+    <div id="lu-tools" class="hidden">
+      <button id="lu-reroll" class="btn small" title="선택지를 다시 뽑는다 (1회)">🎲 리롤</button>
+      <button id="lu-banish" class="btn small danger" title="마지막 카드를 영구 제외 (이번 런)">🚫 밴시시</button>
+    </div>
+    <div id="lu-toolsCount" class="lu-tools-count"></div>
   </div>
 </div>
 
@@ -144,11 +161,21 @@
 <div id="overlay-chest" class="overlay hidden">
   <div class="panel ch-panel">
     <div id="ch-title">💎 보물 상자!</div>
-    <div class="ch-sub">행운의 강화가 결정되는 중...</div>
+    <div class="ch-sub">행운의 강화가 결정되는 중... <b class="ch-stop-hint">(릴을 탭하면 즉시 정지!)</b></div>
     <div id="ch-slots"></div>
     <div id="ch-result"></div>
     <button id="ch-done" class="btn hidden">획득 완료!</button>
+    <div id="ch-curse" class="hidden">
+      <button id="ch-curse-open" class="btn small">📦 그냥 연다</button>
+      <button id="ch-curse-gamble" class="btn small danger">😈 저주를 걸고 2배로 (실패 시 젬만)</button>
+    </div>
   </div>
+</div>
+
+<!-- ============ 🎰 빅 윈 세레머니 (킬 마일스톤 / 메가 체스트) ============ -->
+<div id="bigwin" class="hidden">
+  <div id="bigwin-tier">BIG WIN!</div>
+  <div id="bigwin-amount"></div>
 </div>
 
 <!-- ============ 일시정지 ============ -->
@@ -173,18 +200,31 @@
   <div class="panel end-panel">
     <div id="end-title">게임 오버</div>
     <div id="end-sub"></div>
+    <div id="end-recap" class="end-recap"></div>
+    <div id="end-chips"></div>
     <div id="end-stats"></div>
     <button id="btn-retry" class="btn start">🔄 다시 도전</button>
     <button id="btn-menu" class="btn">메인으로</button>
   </div>
 </div>
 
-<script src="js/core.js?v=120"></script>
-<script src="js/audio.js?v=120"></script>
-<script src="js/map.js?v=120"></script>
-<script src="js/entities.js?v=120"></script>
-<script src="js/weapons.js?v=120"></script>
-<script src="js/upgrades.js?v=120"></script>
-<script src="js/game.js?v=120"></script>
+<!-- ============ 🎰 도파민 칩 상점 (런 시작 전 영구 버프) ============ -->
+<div id="overlay-shop" class="overlay hidden">
+  <div class="panel shop-panel">
+    <div class="shop-head">🪙 도파민 칩 상점</div>
+    <div class="shop-sub">런이 끝나면 칩을 획득한다 · 버프는 영구 적용된다</div>
+    <div id="shop-chips"></div>
+    <div id="shop-items"></div>
+    <button id="shop-close" class="btn">닫기</button>
+  </div>
+</div>
+
+<script src="js/core.js?v=121"></script>
+<script src="js/audio.js?v=121"></script>
+<script src="js/map.js?v=121"></script>
+<script src="js/entities.js?v=121"></script>
+<script src="js/weapons.js?v=121"></script>
+<script src="js/upgrades.js?v=121"></script>
+<script src="js/game.js?v=121"></script>
 </body>
 </html>
