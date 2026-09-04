@@ -663,6 +663,7 @@ function initRun(seed) {
   G._chestQueue = 0; G._chestBest = 0;
   G.pois = [];
   G.poisCleared = new Set();
+  G.poisSeen = new Set(); // POI 발견 기록 — 재발견 시 배너/사운드 스팸 방지
   G.visitedBiomes = new Set();
   G.merchant = null;
   G.frenzy = false;
@@ -2165,11 +2166,14 @@ function updatePOIs(dt) {
   for (const cand of MapGen.poiNear(p.x, p.y, 1900)) {
     const key = cand.rx + ',' + cand.ry;
     if (G.pois.some(q => q.key === key)) continue;
+    G.poisSeen = G.poisSeen || new Set();
+    const seen = G.poisSeen.has(key); // 이 런에서 이미 발견된 적 있던 POI — 재발견은 조용히
     const poi = { ...cand, key, cleared: false, ritualActive: false, waveT: 0 };
     G.pois.push(poi);
     if (cand.type === 'nest') {
-      showBanner('🏴 보물 둥지 발견! 경비가 지킨다...', '#ff3b5c');
-      SFX.play('warn');
+      if (!seen) showBanner('🏴 보물 둥지 발견! 경비가 지킨다...', '#ff3b5c');
+      else showBanner('🏴 보물 둥지 (재발견) — 경비가 재배치된다', 'rgba(255,120,120,0.8)');
+      if (!seen) SFX.play('warn');
       for (let i = 0; i < 3; i++) {
         const a = (i / 3) * TAU;
         const gx = cand.x + Math.cos(a) * 130, gy = cand.y + Math.sin(a) * 130;
@@ -2187,33 +2191,43 @@ function updatePOIs(dt) {
       G.pickups.push({ kind: 'chest', x: cand.x, y: cand.y - 10, val: 5, t: 0, vx: 0, vy: 0 });
       poi.guards = G.enemies.filter(e => e.guard && dist2(e.home.x, e.home.y, cand.x, cand.y) < 300 * 300);
     } else if (cand.type === 'spring') {
-      showBanner('⛲ 도파민 샘 발견! 서 있으면 충전된다', '#ffd23f');
-      SFX.play('heal');
+      if (!seen) { showBanner('⛲ 도파민 샘 발견! 서 있으면 충전된다', '#ffd23f'); SFX.play('heal'); }
     } else if (cand.type === 'ritual') {
-      showBanner('🔮 혈천 마법진 발견... 중앙에 서면 의식이 시작된다', '#b06cff');
-      SFX.play('portal');
+      if (!seen) { showBanner('🔮 혈천 마법진 발견... 중앙에 서면 의식이 시작된다', '#b06cff'); SFX.play('portal'); }
     }
+    G.poisSeen.add(key); // 발견 기록 — 이 런에서 같은 POI 알림은 다시 안 뜬다
   }
 
   for (const poi of G.pois) {
     const d = dist(p.x, p.y, poi.x, poi.y);
 
-    // 둥지 사망 거리: 플레이어가 둥지를 크게 벗어나면 미발견 상태로 리셋 —
-    // 경비병은 둥지에 잔류하므로(거리 제거 면제) 멀리 있는 동안 필드에 방치하지 않고
-    // 회수했다가 다시 가까워지면 '재발견'으로 경비병 재배치. 소탕 보상은 진짜 전투로만.
+    // 둥지 이탈: POI를 목록에서 빼지 않는다 — 빼면 poiNear이 다시 '발견'시켜
+    // 접근/이탈 경계에서 발견 배너가 무한 반복했다. 대신 경비병만 회수해 필드를 정리하고,
+    // poi는 dormant 상태로 남긴 뒤 재접근 시 '경비 재배치'만 한다 (알림은 poisSeen이 차단).
     if (poi.type === 'nest' && !poi.cleared && !poi.ritualActive) {
-      if (d > 2300) {
-        // 경비병 회수
+      if (d > 2300 && !poi.dormant) {
+        poi.dormant = true;
         if (poi.guards) for (const g of poi.guards) {
           const gi = G.enemies.indexOf(g);
           if (gi >= 0) G.enemies.splice(gi, 1);
         }
-        const idx = G.pois.indexOf(poi);
-        if (idx >= 0) G.pois.splice(idx, 1);
-        // 둥지 상자도 회수 (미획득 상태로 되돌림 — 재발견 시 다시 드랍)
+        poi.guards = [];
+        // 둥지 상자도 회수 (미획득 상태로 되돌림 — 재접근 시 다시 드랍)
         const chestIdx = G.pickups.findIndex(pk => pk.kind === 'chest' && dist2(pk.x, pk.y, poi.x, poi.y) < 60 * 60);
         if (chestIdx >= 0) G.pickups.splice(chestIdx, 1);
-        continue;
+      } else if (d <= 2300 && poi.dormant && poi.guards && poi.guards.length === 0 && !poi.cleared) {
+        // 재접근: 경비병 재배치 (배너/사운드 없이 — poisSeen이 알림을 담당).
+        // 단, 이미 소탕 완료된 둥지는 두 번 다시 배치하지 않는다 — 끝난 콘텐츠는 끝.
+        poi.dormant = false;
+        for (let i = 0; i < 3; i++) {
+          const a = (i / 3) * TAU;
+          const gx = poi.x + Math.cos(a) * 130, gy = poi.y + Math.sin(a) * 130;
+          const b = MapGen.biome(Math.floor(gx / TILE), Math.floor(gy / TILE));
+          const e = spawnEnemy(gx, gy, pickEnemyForBiome(b, { 1: 0, 2: 10, 3: 3 }), { elite: true });
+          e.guard = true; e.home = { x: poi.x, y: poi.y }; e.spawnT = 0.3;
+          poi.guards.push(e);
+        }
+        G.pickups.push({ kind: 'chest', x: poi.x, y: poi.y - 10, val: 5, t: 0, vx: 0, vy: 0 });
       }
     }
 

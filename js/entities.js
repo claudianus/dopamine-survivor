@@ -804,7 +804,9 @@ function drawEnemy(ctx, e) {
   const squash = 1 + Math.sin(e.wobble) * 0.06;
   const spawning = e.spawnT > 0;
   const spawnScale = spawning ? 1 - e.spawnT * 1.6 : 1;
-  const bodyCol = e.flash > 0.4 ? '#e8ecf4' : darken(e.color, e.boss ? 0.62 : 0.5);
+  // 본체 톤 0.8 (기존 0.5): darken(0.5)에선 어두운 지형(흑림 rgb 46,126,76)에
+  // 슬라임 본체(rgb 43,109,59)가 묻혀 윤곽이 사라졌다. 원색에 가깝게 회복.
+  const bodyCol = e.flash > 0.4 ? '#e8ecf4' : darken(e.color, e.boss ? 0.85 : 0.8);
   const glowCol = e.color;
 
   ctx.save();
@@ -853,6 +855,17 @@ function drawEnemy(ctx, e) {
   ctx.scale(1 / squash, squash);
   const r = e.r;
   const body = bodyCol;
+
+  // 다크 실루엣 패드 (Figure-Ground 분리): 몸통보다 약간 큰 어두운 원을 먼저 깔아
+  // 어떤 지형·배경에서도 적의 외곽이 항상 어두운 에지로 분리된다.
+  // 밝은 지형(설원)에서도, 어두운 지형(흑림/화산)에서도 동일 규칙 — 논리적 일관성.
+  if (!e.boss) {
+    ctx.fillStyle = 'rgba(10,14,22,0.55)';
+    ctx.beginPath(); ctx.arc(0, 0, r * 1.18, 0, TAU); ctx.fill();
+  } else {
+    ctx.fillStyle = 'rgba(10,14,22,0.65)';
+    ctx.beginPath(); ctx.arc(0, 0, r * 1.1, 0, TAU); ctx.fill();
+  }
 
   // 몸통 림 스트로크
   ctx.strokeStyle = glowCol;
@@ -1463,6 +1476,10 @@ function drawCrystal(ctx, c) {
   // 그림자
   ctx.fillStyle = 'rgba(0,0,0,0.28)';
   ctx.beginPath(); ctx.ellipse(0, 10, 24, 8, 0, 0, TAU); ctx.fill();
+  // 다크 베이스 링: 결정 조각들이 밝은 지형(설원)에서 발광에 묻히지 않게
+  // 조각 뒤에 어두운 발판 원을 깐다 — 젬/하트 아웃라인과 같은 figure-ground 규칙.
+  ctx.fillStyle = 'rgba(10,14,22,0.5)';
+  ctx.beginPath(); ctx.ellipse(0, -2, 30, 22, 0, 0, TAU); ctx.fill();
   // 결정 조각들
   for (const sh of c.shards) {
     ctx.save();
