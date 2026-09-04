@@ -164,7 +164,6 @@ const QUALITY = {
   get maxLights() { return this.level === 0 ? 22 : (this.level === 1 ? 34 : 46); },
   get maxEnemies() { return this.level === 0 ? 90 : (this.level === 1 ? 130 : 160); },
   get bloomOn() { return true; },
-  get streakOn() { return this.level >= 1; },
   get grainOn() { return this.level >= 1; },
   get shaftOn() { return this.level >= 2; },
   get dustOn() { return this.level >= 1; },

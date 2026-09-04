@@ -25,7 +25,6 @@ const POST = {
     this.bpOK = true; // (레거시 호환) 자체 픽셀 브라이트패스로 대체됨
     this.bloomA = document.createElement('canvas');
     this.bloomB = document.createElement('canvas');
-    this.streak = document.createElement('canvas');
     // 필름 그레인 타일
     this.grain = document.createElement('canvas');
     this.grain.width = 160; this.grain.height = 160;
@@ -48,7 +47,6 @@ const POST = {
     this.bloomA.width = Math.max(2, (G.view.w * q) | 0);
     this.bloomA.height = Math.max(2, (G.view.h * q) | 0);
     this.bloomB.width = this.bloomA.width; this.bloomB.height = this.bloomA.height;
-    this.streak.width = this.bloomA.width; this.streak.height = this.bloomA.height;
     this._gradeGrad = null;
     this._bpCacheT = 0; this._bpCache = false;
   },
@@ -164,65 +162,9 @@ const POST = {
       b2.filter = 'none';
       outCtx.globalAlpha = 0.27;
       outCtx.drawImage(this.bloomB, 0, 0, W, H);
-      // 아나모픽 렌즈 스트릭: 저사양(레벨0)은 스킵
-      if (qLevel >= 1 && QUALITY.streakOn) {
-        const sc = this.streak.getContext('2d');
-        sc.setTransform(1, 0, 0, 1, 0, 0);
-        sc.clearRect(0, 0, bw, bh);
-        sc.filter = 'blur(1.6px) saturate(0.5)';
-        sc.drawImage(this.bloomA, -bw * 2.5, 0, bw * 6, bh);
-        sc.filter = 'none';
-        outCtx.globalAlpha = 0.22;
-        outCtx.drawImage(this.streak, 0, 0, W, H);
-      }
       outCtx.globalAlpha = 1;
       outCtx.globalCompositeOperation = 'source-over';
       } // end playing bloom
-    }
-
-    /* 렌즈 플레어: 저사양은 스킵 (필레이트 절약) */
-    if (qLevel >= 2 && typeof LIGHTS !== 'undefined' && LIGHTS.bloom && LIGHTS.bloom.length) {
-      const cands = LIGHTS.bloom.filter(l => l.a > 0.55).slice(0, 3);
-      if (cands.length) {
-        outCtx.globalCompositeOperation = 'lighter';
-        const cx = W / 2, cy = H / 2;
-        for (const l of cands) {
-          const sx = (l.x - camL) * zoom, sy = (l.y - camT) * zoom;
-          if (sx < -60 || sy < -60 || sx > W + 60 || sy > H + 60) continue;
-          const I = clamp(l.a * clamp(l.r / 260, 0.45, 1.3), 0.3, 0.85);
-          // 스타버스트 가로 스트릭 (아나모픽)
-          const sl = 70 + I * 170;
-          const g1 = outCtx.createLinearGradient(sx - sl, sy, sx + sl, sy);
-          g1.addColorStop(0, 'rgba(255,255,255,0)');
-          g1.addColorStop(0.5, `rgba(255,255,255,${(0.3 * I).toFixed(3)})`);
-          g1.addColorStop(1, 'rgba(255,255,255,0)');
-          outCtx.fillStyle = g1;
-          outCtx.fillRect(sx - sl, sy - 1.4 * I, sl * 2, 2.8 * I);
-          // 세로 스트릭 (짧게)
-          const sv = 34 + I * 66;
-          const g2 = outCtx.createLinearGradient(sx, sy - sv, sx, sy + sv);
-          g2.addColorStop(0, 'rgba(255,255,255,0)');
-          g2.addColorStop(0.5, `rgba(255,255,255,${(0.26 * I).toFixed(3)})`);
-          g2.addColorStop(1, 'rgba(255,255,255,0)');
-          outCtx.fillStyle = g2;
-          outCtx.fillRect(sx - I, sy - sv, 2 * I, sv * 2);
-          // 코어 글로어
-          Glow.draw(outCtx, l.color, sx, sy, 20 + I * 26, 0.38 * I);
-          // 고스트 체인: 광원→화면중심 축을 관통해 반대편까지 이어지는 렌즈 내부 반사
-          const dx = cx - sx, dy = cy - sy;
-          const ghosts = [[0.35, 13], [0.75, 8], [1.15, 19], [1.6, 11]];
-          for (const [k, r0] of ghosts) {
-            const gx = sx + dx * k, gy = sy + dy * k;
-            const gr = r0 * (0.6 + I * 0.8);
-            if (gx < -40 || gy < -40 || gx > W + 40 || gy > H + 40) continue;
-            outCtx.strokeStyle = `rgba(205,230,255,${(0.09 * I).toFixed(3)})`;
-            outCtx.lineWidth = 1.5;
-            outCtx.beginPath(); outCtx.arc(gx, gy, gr, 0, TAU); outCtx.stroke();
-            Glow.draw(outCtx, l.color, gx, gy, gr * 1.6, 0.07 * I);
-          }
-        }
-        outCtx.globalCompositeOperation = 'source-over';
-      }
     }
 
     /* 색수차: SVG 채널 분리 필터로 R/B를 반대로 미끄러뜨림 (러시·임팩트) */
