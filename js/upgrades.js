@@ -29,13 +29,15 @@ function initPassives() {
 
 function recomputeStats() {
   const p = G.player, pv = G.passives;
-  p.speed = 255 * (1 + pv.boots * 0.08);
-  p.maxHp = 160 + pv.vitality * 25;
+  const cores = G.cores || {};
+  p.speed = 255 * (1 + pv.boots * 0.08) * (1 + (cores.swiftCore || 0) * 0.03);
+  p.maxHp = 160 + pv.vitality * 25 + (cores.vitalCore || 0) * 15;
   p.magnetR = 95 * (1 + pv.magnet * 0.35);
   p.critC = 0.05 + pv.crit * 0.05;
   p.critD = 2.0 + pv.crit * 0.15;
-  p.xpMult = 1 + pv.wisdom * 0.10;
+  p.xpMult = (1 + pv.wisdom * 0.10) * (1 + (cores.greedCore || 0) * 0.06);
   p.regen = pv.regen * 0.7;
+  p.corePower = (cores.powerCore || 0) * 0.04; // weaponDmgMult에 곱해질 무한 축
 }
 
 /* 선택지 풀 구성 (밴시시된 카드는 이번 런에서 영구 제외) */
@@ -68,6 +70,22 @@ function buildChoices(count = 3) {
     pool.push({ type: 'fallback', id: 'power5', name: '축적된 힘', emoji: '💪', desc: '공격력 영구 +8%', weight: 1 });
   }
 
+  /* ⚡ 오버차지 코어 — 성장 풀이 얇어지면(잔여 업글 ≤ 8) 무한 스택 카드가 합류한다.
+   * 기존엔 풀 고갈 후엔 '힘/회복' 폴백만 나와 3분부터 성장 재미가 죽었다.
+   * 코어는 몇 번이고 뽑을 수 있다 — 컨텐츠가 끝나지 않는 성장 축. */
+  const CORE_DEFS = {
+    powerCore:  { name: '⚡ 파워 코어',   emoji: '🔋', desc: '공격력 영구 +4% (무제한 스택)', weight: 10 },
+    vitalCore:  { name: '❤️ 바이탈 코어', emoji: '🫀', desc: '최대 체력 +15 영구 (무제한 스택)', weight: 8 },
+    swiftCore:  { name: '💨 스윌 코어',   emoji: '🌀', desc: '이동 속도 +3% 영구 (무제한 스택)', weight: 7 },
+    greedCore:  { name: '💎 그리드 코어', emoji: '🪙', desc: '젬 획득량 +6% 영구 (무제한 스택)', weight: 7 },
+  };
+  if (pool.length <= 8) {
+    for (const id in CORE_DEFS) {
+      if (G.banished.has('c:' + id)) continue;
+      pool.push({ type: 'core', id, ...CORE_DEFS[id] });
+    }
+  }
+
   const out = [];
   const used = new Set();
   let guard = 0;
@@ -92,6 +110,12 @@ function applyUpgrade(u) {
   } else if (u.type === 'passive') {
     G.passives[u.id]++;
     if (u.id === 'vitality') G.player.hp += 25;
+    recomputeStats();
+  } else if (u.type === 'core') {
+    // ⚡ 오버차지 코어 — 무한 스택 (G.cores에 카운트, recomputeStats에 반영)
+    G.cores = G.cores || { powerCore: 0, vitalCore: 0, swiftCore: 0, greedCore: 0 };
+    G.cores[u.id] = (G.cores[u.id] || 0) + 1;
+    if (u.id === 'vitalCore') { G.player.maxHp += 15; G.player.hp += 15; }
     recomputeStats();
   } else if (u.type === 'fallback') {
     if (u.id === 'heal') G.player.hp = Math.min(G.player.maxHp, G.player.hp + 50);
@@ -120,19 +144,22 @@ function openLevelUp() {
   box.innerHTML = '';
   choices.forEach((u, i) => {
     const def = u.type === 'weapon' ? WEAPON_DEFS[u.id] : (u.type === 'passive' ? PASSIVE_DEFS[u.id] : u);
+    const coreCount = u.type === 'core' ? ((G.cores && G.cores[u.id]) || 0) : null;
     const title = u.type === 'weapon'
       ? (u.isNew ? `${def.emoji} ${def.name}` : `${def.emoji} ${def.name} Lv.${(u.lvl || 1) - 1} → Lv.${u.lvl}`)
       : (u.type === 'passive'
         ? (u.isNew ? `${def.emoji} ${def.name}` : `${def.emoji} ${def.name} Lv.${(u.lvl || 1) - 1} → Lv.${u.lvl}`)
-        : `${u.emoji} ${u.name}`);
+        : u.type === 'core'
+          ? `${u.emoji} ${u.name}${coreCount ? ' ×' + (coreCount + 1) : ''}`
+          : `${u.emoji} ${u.name}`);
     const desc = u.type === 'weapon' ? (u.isNew ? '새 무기 해금! ' + def.desc(1) : def.desc(u.lvl))
       : (u.type === 'passive' ? def.desc : u.desc);
 
     const card = document.createElement('button');
-    card.className = 'lu-card' + (u.isNew ? ' new' : '');
+    card.className = 'lu-card' + (u.isNew ? ' new' : '') + (u.type === 'core' ? ' core' : '');
     card.style.animationDelay = (i * 0.08) + 's';
     card.innerHTML = `
-      <div class="lu-badge">${u.isNew ? 'NEW!' : 'LV UP'}</div>
+      <div class="lu-badge">${u.type === 'core' ? 'CORE' : (u.isNew ? 'NEW!' : 'LV UP')}</div>
       <div class="lu-emoji">${def.emoji || u.emoji}</div>
       <div class="lu-title">${title}</div>
       <div class="lu-desc">${desc}</div>
@@ -175,7 +202,9 @@ function luBanish() {
   if (G.state !== 'levelup' || G.banishes <= 0 || !G.luChoices) return;
   G.banishes--;
   const u = G.luChoices[G.luChoices.length - 1];
-  G.banished.add((u.type === 'weapon' ? 'w:' : 'p:') + u.id);
+  // 타입별 프리픽스 (무한 코어도 밴시시 가능 — 싫은 코어는 안 나오게)
+  const prefix = u.type === 'weapon' ? 'w:' : (u.type === 'passive' ? 'p:' : (u.type === 'core' ? 'c:' : 'f:'));
+  G.banished.add(prefix + u.id);
   SFX.play('banish');
   POST.triggerFlash(0.06);
   // 선택지 재구성: 밴시시 반영 + 마지막 카드 제외 후 1장 재보충
@@ -240,7 +269,9 @@ function openChest(val, opts = {}) {
     if (pick) evoIds.push(pick);
   }
 
-  const nRewards = Math.min(isMega ? 8 : (val >= 5 ? 5 : (val >= 4 ? 4 : 3)), 8);
+  // 상자 슬롯 축소 (2026-09): 3~5개 무료 업글 폭탄이 3분만에 성장 풀을 소진시켰다.
+  // 상자의 본 목적은 진화 재료 — 일반 1~2개, 보스 3개, 메가만 6개.
+  const nRewards = Math.min(isMega ? 6 : (val >= 5 ? 3 : (val >= 4 ? 2 : 1)), 6);
   const rewards = [];
   const allEmojis = Object.values(WEAPON_DEFS).map(w => w.emoji)
     .concat(Object.values(PASSIVE_DEFS).map(p => p.emoji))

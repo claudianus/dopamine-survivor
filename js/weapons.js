@@ -143,7 +143,7 @@ function initWeapons() {
   G.fx = { bolts: [] }; // 번개 시각 효과
 }
 
-function weaponDmgMult() { return (1 + G.passives.power * 0.12) * (G.rage && G.rage.active ? 2 : 1); }
+function weaponDmgMult() { return (1 + G.passives.power * 0.12 + (G.player.corePower || 0)) * (G.rage && G.rage.active ? 2 : 1); }
 function cooldownMult() { return Math.pow(0.93, G.passives.haste); }
 
 function updateWeapons(dt) {

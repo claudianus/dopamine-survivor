@@ -278,6 +278,7 @@ const SFX = {
         this.noise(0.7, 0.18, 1800);
         break;
       case 'warn':
+        if (!this.throttle('warn', 600)) break; // 다중 발견/웨이브 동시 알림 시 사운드 겹침 방지
         this.tone(185, 0.26, 'square', 0.3, -24); this.tone(185, 0.26, 'square', 0.3, -24, 0.34);
         this.tone(93, 0.6, 'sawtooth', 0.16, -10, 0.02);
         break;

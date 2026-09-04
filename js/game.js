@@ -688,6 +688,7 @@ function initRun(seed) {
   G.pityChest = 0;          // 🎰 pity 카운터 초기화
   G.rerolls = undefined; G.banishes = undefined; // refreshLuTools가 버프 반영해 채움
   G.banished = new Set();   // 🚫 밴시시 (이번 런)
+  G.cores = null;           // ⚡ 오버차지 코어 (무한 성장 축 — applyUpgrade이 생성)
   G.finalMinuteStarted = false; // ⏰ 최후의 60초
   document.body.classList.remove('rush'); // 이전 러시 상태 잔존 방지
   MapGen.initFog();
@@ -798,13 +799,26 @@ function addCombo() {
     shakeCam(3);
   }
 }
+/* 배너 큐 — 같은 프레임에 여러 알림(둥지+샘+정예웨이브 동시 발견 등)이 몰리면
+ * 마지막 것만 보이고 나머지는 잔상처럼 깜빡이던 문제. 순차 재생으로 해결. */
+const BANNER_Q = { queue: [], showing: false };
 function showBanner(text, color) {
+  BANNER_Q.queue.push({ text, color: color || '#fff' });
+  if (BANNER_Q.queue.length > 3) BANNER_Q.queue.length = 3; // 아주 오래된 알림은 드롭
+  if (!BANNER_Q.showing) bannerNext();
+}
+function bannerNext() {
+  const item = BANNER_Q.queue.shift();
+  if (!item) { BANNER_Q.showing = false; return; }
+  BANNER_Q.showing = true;
   const el = document.getElementById('banner');
-  el.textContent = text;
-  el.style.color = color || '#fff';
+  el.textContent = item.text;
+  el.style.color = item.color;
   el.classList.remove('show');
   void el.offsetWidth; // 리플로우로 애니메이션 리셋
   el.classList.add('show');
+  // 다음 배너는 이 배너의 가독 시간(1.4s)이 확보된 뒤에
+  setTimeout(bannerNext, 1400);
 }
 
 /* ---------- 도파민 러시 ---------- */
