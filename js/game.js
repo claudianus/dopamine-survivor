@@ -103,16 +103,13 @@ const POST = {
       outCtx.drawImage(sceneCanvas, 0, 0, W, H);
     }
 
-    if (this.filterOK) {
+if (this.filterOK) {
       const bw = this.bloomA.width, bh = this.bloomA.height;
       const b1 = this.bloomA.getContext('2d');
       // ===== 자체 픽셀 브라이트패스 =====
       // SVG filter(url)는 GPU/드라이버별로 결과가 달라져 전체 과다노출 버그의 원인이 됨.
       // ImageData 직접 순회로 휘도 0.72 이하 픽셀을 0으로 만든다 — 완전히 결정적.
       // 게임이 멈춘 상태(레벨업/상자/일시정지)에선 블룸 갱신/합성 스킵 — 오래된 밝은 프레임 방출 방지
-      // 저사양은 갱신 주기를 늦춰 CPU 절약 (0:900ms / 1:600ms / 2:450ms)
-      // ※ b1.clearRect는 재계산 시에만: 매 프레임 지우면 캐시 주기 동안 블룸이
-      //   깜빡이며 점멸하는 버그 (밝은 프레임 1장 / 어두운 프레임 N장 반복)
       if (G.state === 'playing') {
       const now2 = performance.now();
       const bpInterval = qLevel === 0 ? 900 : (qLevel === 1 ? 600 : 450);
@@ -496,23 +493,14 @@ const LIGHTS = {
       Glow.draw(lc, l.color, (l.x - camL) * s, (l.y - camT) * s, l.r * s, l.a);
     }
 
-    // 씬에 multiply 합성 (어둠 속 대비) + 컬러 블룸
-    this.bloom.length = 0;
-    for (const l of L) if (l.bloom > 0) this.bloom.push(l);
-    this.applyLightmap(camL, camT, shx, shy, zoom);
-
-    this.details(camL, camT, vw, vh, dt2);
-  },
-
-  /* 캐시된 라이트맵 합성 — 저사양 격프레임 갱신 시 홀수 프레임에도 호출해야
-   * 조명 on/off가 30Hz로 스트로브(화면 전체가 하얗게 깜빡임)하지 않음 */
-  applyLightmap(camL, camT, shx, shy, zoom) {
     // 씬에 multiply 합성 (어둠 속 대비)
     ctx.globalCompositeOperation = 'multiply';
     ctx.drawImage(this.canvas, 0, 0, G.view.w, G.view.h);
     ctx.globalCompositeOperation = 'source-over';
 
     // 컬러 블룸: 주요 광원이 지면을 물들이게
+    this.bloom.length = 0;
+    for (const l of L) if (l.bloom > 0) this.bloom.push(l);
     if (this.bloom.length) {
       ctx.save();
       ctx.scale(zoom, zoom);
@@ -524,6 +512,8 @@ const LIGHTS = {
       ctx.globalCompositeOperation = 'source-over';
       ctx.restore();
     }
+
+    this.details(camL, camT, vw, vh, dt2);
   },
 
   /* 씬 직행 디테일 (라이트맵과 분리 — 저사양 격프레임 갱신 시에도 매 프레임 호출해 깜빡임 방지) */
@@ -1268,14 +1258,29 @@ function render(dt = 1 / 60) {
   /* ---------- 다이내믹 라이팅 (라이트맵 + 블룸) ---------- */
   if (G.player && LIGHTS.canvas) {
     // 저사양은 라이트맵만 격프레임 갱신 (부드러운 조명이라 30Hz로도 동일)
-    // 홀수 프레임에도 캐시 합성은 반드시 적용 (미적용 시 조명 on/off 스트로브)
     // 그림자/먼지 등 씬 디테일은 매 프레임 그려 깜빡임 방지
     if (QUALITY.level > 0 || ((G.frame || 0) % 2 === 0)) {
       LIGHTS.render(cam.x - shx - kx, cam.y - shy - ky, shx, shy, kx, ky, zoom, dt);
     } else {
+      // 홀수 프레임: 캐시된 라이트맵을 multiply 합성 후 디테일 (깜빡임 방지)
       const vw2 = G.view.w / zoom, vh2 = G.view.h / zoom;
-      LIGHTS.applyLightmap(cam.x - shx - kx, cam.y - shy - ky, shx, shy, zoom);
-      LIGHTS.details(cam.x - shx - kx, cam.y - shy - ky, vw2, vh2, dt);
+      const camL2 = cam.x - shx - kx, camT2 = cam.y - shy - ky;
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.drawImage(LIGHTS.canvas, 0, 0, G.view.w, G.view.h);
+      ctx.globalCompositeOperation = 'source-over';
+      // 컬러 블룸 (캐시된 bloom)
+      if (LIGHTS.bloom.length) {
+        ctx.save();
+        ctx.scale(zoom, zoom);
+        ctx.translate(-camL2 + shx, -camT2 + shy);
+        ctx.globalCompositeOperation = 'lighter';
+        for (const l of LIGHTS.bloom) {
+          Glow.draw(ctx, l.color, l.x, l.y, l.r * 1.15, l.bloom);
+        }
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.restore();
+      }
+      LIGHTS.details(camL2, camT2, vw2, vh2, dt);
     }
   }
 
